@@ -45,6 +45,7 @@ const searchFlipkart = async (query) => {
     try {
         browser = await puppeteer.launch({ 
             headless: "new", 
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--window-size=1920x1080'] 
         });
         const page = await browser.newPage();
@@ -117,7 +118,11 @@ const searchFlipkart = async (query) => {
 const searchMeesho = async (query) => {
     let browser;
     try {
-        browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+        browser = await puppeteer.launch({ 
+            headless: "new", 
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+        });
         const page = await browser.newPage();
         
         // Speed up scraping and avoid timeouts by blocking heavy assets
@@ -174,6 +179,7 @@ const searchMeesho = async (query) => {
         try {
             browser = await puppeteer.launch({ 
                 headless: "new", 
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--window-size=1920x1080'] 
             });
             const page = await browser.newPage();
@@ -226,6 +232,7 @@ const searchMeesho = async (query) => {
         try {
             browser = await puppeteer.launch({ 
                 headless: "new", 
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--window-size=1920x1080'] 
             });
             const page = await browser.newPage();

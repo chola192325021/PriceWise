@@ -116,24 +116,20 @@ app.get("/products/search-live", async (req, res) => {
 
         // Show top 20 deals
         const results = [];
-        const count = Math.min(amazon.length, 20);
-        if (count === 0 && flipkart.length === 0 && meesho.length === 0) {
+        const count = Math.max(amazon.length, flipkart.length, meesho.length);
+        const loopCount = Math.min(count, 20);
+        
+        if (loopCount === 0) {
             // let fallback handle it
         }
 
-        for (let i = 0; i < count; i++) {
+        for (let i = 0; i < loopCount; i++) {
             const amz = amazon[i];
             
             // Find the best matching item in Flipkart and Meesho arrays
-            let fk = flipkart.find(f => isMatch(amz.title, f.title));
-            let ms = meesho.find(m => isMatch(amz.title, m.title));
+            let fk = amz ? flipkart.find(f => isMatch(amz.title, f.title)) : flipkart[i];
+            let ms = amz ? meesho.find(m => isMatch(amz.title, m.title)) : meesho[i];
             
-            // If Amazon failed but we still have others (fallback)
-            if (!amz) {
-                fk = flipkart[i];
-                ms = meesho[i];
-            }
-
             if (!amz && !fk && !ms) continue;
 
             const platforms = [];

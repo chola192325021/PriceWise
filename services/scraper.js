@@ -40,15 +40,24 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-const searchFlipkart = async (query) => {
-    let browser;
-    try {
-        browser = await puppeteer.launch({ 
+let globalBrowser = null;
+const getBrowser = async () => {
+    if (!globalBrowser) {
+        globalBrowser = await puppeteer.launch({ 
             headless: "new", 
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--window-size=1920x1080'] 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu'] 
         });
-        const page = await browser.newPage();
+    }
+    return globalBrowser;
+};
+
+const searchFlipkart = async (query) => {
+    let page;
+    try {
+        const browser = await getBrowser();
+    try {
+        page = await browser.newPage();
         
         // Speed up scraping and avoid timeouts by blocking heavy assets
         await page.setRequestInterception(true);
@@ -110,20 +119,16 @@ const searchFlipkart = async (query) => {
         return results;
     } catch (error) {
         console.error("Flipkart search failed:", error.message);
-        if (browser) await browser.close();
+        if (page) await page.close();
         return [];
     }
 };
 
 const searchMeesho = async (query) => {
-    let browser;
+    let page;
     try {
-        browser = await puppeteer.launch({ 
-            headless: "new", 
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
-        });
-        const page = await browser.newPage();
+        const browser = await getBrowser();
+        page = await browser.newPage();
         
         // Speed up scraping and avoid timeouts by blocking heavy assets
         await page.setRequestInterception(true);
@@ -170,19 +175,15 @@ const searchMeesho = async (query) => {
         return results;
     } catch (error) {
         console.error("Meesho search failed:", error.message);
-        if (browser) await browser.close();
+        if (page) await page.close();
         return [];
     }
 };
     const searchCroma = async (query) => {
-        let browser;
-        try {
-            browser = await puppeteer.launch({ 
-                headless: "new", 
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--window-size=1920x1080'] 
-            });
-            const page = await browser.newPage();
+    let page;
+    try {
+        const browser = await getBrowser();
+        page = await browser.newPage();
             
             await page.setRequestInterception(true);
             page.on('request', (req) => {
@@ -218,24 +219,20 @@ const searchMeesho = async (query) => {
                 return items;
             });
             
-            await browser.close();
+            await page.close();
             return results;
         } catch (error) {
             console.error("Croma search failed:", error.message);
-            if (browser) await browser.close();
+            if (page) await page.close();
             return [];
         }
     };
 
     const searchReliance = async (query) => {
-        let browser;
-        try {
-            browser = await puppeteer.launch({ 
-                headless: "new", 
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--window-size=1920x1080'] 
-            });
-            const page = await browser.newPage();
+    let page;
+    try {
+        const browser = await getBrowser();
+        page = await browser.newPage();
             
             await page.setRequestInterception(true);
             page.on('request', (req) => {
@@ -271,11 +268,11 @@ const searchMeesho = async (query) => {
                 return items;
             });
             
-            await browser.close();
+            await page.close();
             return results;
         } catch (error) {
             console.error("Reliance search failed:", error.message);
-            if (browser) await browser.close();
+            if (page) await page.close();
             return [];
         }
     };

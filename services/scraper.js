@@ -7,9 +7,9 @@ const HEADERS = {
 };
 
 const searchAmazon = async (query) => {
-    let browser;
+    let page;
     try {
-        browser = await puppeteer.launch(getBrowserArgs());
+        const browser = await getBrowser();
         const page = await browser.newPage();
         
         await page.setRequestInterception(true);
@@ -50,11 +50,11 @@ const searchAmazon = async (query) => {
             return items;
         });
         
-        await browser.close();
+        await page.close();
         return results;
     } catch (error) {
         console.error("Amazon search failed:", error.message);
-        if (browser) await browser.close();
+        if (browser) await page.close();
         return [];
     }
 };
@@ -63,19 +63,38 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-const getBrowserArgs = () => {
-    return {
-        headless: "new", 
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--no-zygote', '--disable-site-isolation-trials']
-    };
+let globalBrowserPromise = null;
+
+const getBrowser = async () => {
+    if (!globalBrowserPromise) {
+        console.log("Launching Global Browser...");
+        globalBrowserPromise = puppeteer.launch({
+            headless: "new",
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', 
+                '--disable-accelerated-2d-canvas', 
+                '--disable-gpu', 
+                '--no-zygote', 
+                '--disable-site-isolation-trials',
+                '--single-process'
+            ]
+        }).catch(err => {
+            console.error("Failed to launch global browser", err);
+            globalBrowserPromise = null;
+            throw err;
+        });
+    }
+    return globalBrowserPromise;
 };
 
 const searchFlipkart = async (query) => {
-    let browser;
+    let page;
     try {
-        browser = await puppeteer.launch(getBrowserArgs());
-        const page = await browser.newPage();
+        const browser = await getBrowser();
+        page = await browser.newPage();
         
         // Speed up scraping and avoid timeouts by blocking heavy assets
         await page.setRequestInterception(true);
@@ -133,19 +152,19 @@ const searchFlipkart = async (query) => {
             return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
         });
         
-        await browser.close();
+        await page.close();
         return results;
     } catch (error) {
         console.error("Flipkart search failed:", error.message);
-        if (browser) await browser.close();
+        if (page) await page.close();
         return [];
     }
 };
 
 const searchMeesho = async (query) => {
-    let browser;
+    let page;
     try {
-        browser = await puppeteer.launch(getBrowserArgs());
+        const browser = await getBrowser();
         const page = await browser.newPage();
         
         // Speed up scraping and avoid timeouts by blocking heavy assets
@@ -189,18 +208,18 @@ const searchMeesho = async (query) => {
             return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
         });
         
-        await browser.close();
+        await page.close();
         return results;
     } catch (error) {
         console.error("Meesho search failed:", error.message);
-        if (browser) await browser.close();
+        if (page) await page.close();
         return [];
     }
 };
     const searchCroma = async (query) => {
-    let browser;
+    let page;
     try {
-        browser = await puppeteer.launch(getBrowserArgs());
+        const browser = await getBrowser();
         const page = await browser.newPage();
             
             await page.setRequestInterception(true);
@@ -237,19 +256,19 @@ const searchMeesho = async (query) => {
                 return items;
             });
             
-            await browser.close();
+            await page.close();
             return results;
         } catch (error) {
             console.error("Croma search failed:", error.message);
-            if (browser) await browser.close();
+            if (page) await page.close();
             return [];
         }
     };
 
     const searchReliance = async (query) => {
-    let browser;
+    let page;
     try {
-        browser = await puppeteer.launch(getBrowserArgs());
+        const browser = await getBrowser();
         const page = await browser.newPage();
             
             await page.setRequestInterception(true);
@@ -286,13 +305,17 @@ const searchMeesho = async (query) => {
                 return items;
             });
             
-            await browser.close();
+            await page.close();
             return results;
         } catch (error) {
             console.error("Reliance search failed:", error.message);
-            if (browser) await browser.close();
+            if (page) await page.close();
             return [];
         }
     };
 
-module.exports = { searchAmazon, searchFlipkart, searchMeesho, searchCroma, searchReliance };
+module.exports = { searchAmazon, searchFlipkart,    searchMeesho,
+    searchCroma,
+    searchReliance,
+    initBrowser: getBrowser
+};

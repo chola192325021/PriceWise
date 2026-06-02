@@ -607,4 +607,8 @@ cron.schedule('0 2 * * *', async () => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  // Warm up the global browser immediately
+  scraper.initBrowser().then(() => console.log("Global browser warmed up and ready")).catch(console.error);
+});

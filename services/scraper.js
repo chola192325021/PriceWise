@@ -40,23 +40,22 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-let globalBrowser = null;
-const getBrowser = async () => {
-    if (!globalBrowser) {
-        globalBrowser = await puppeteer.launch({ 
+let globalBrowserPromise = null;
+const getBrowser = () => {
+    if (!globalBrowserPromise) {
+        globalBrowserPromise = puppeteer.launch({ 
             headless: "new", 
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu'] 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu', '--no-zygote', '--disable-site-isolation-trials'] 
         });
     }
-    return globalBrowser;
+    return globalBrowserPromise;
 };
 
 const searchFlipkart = async (query) => {
     let page;
     try {
         const browser = await getBrowser();
-    try {
         page = await browser.newPage();
         
         // Speed up scraping and avoid timeouts by blocking heavy assets
@@ -72,7 +71,7 @@ const searchFlipkart = async (query) => {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         const url = `https://www.flipkart.com/search?q=${encodeURIComponent(query)}`;
         
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
         const results = await page.evaluate(() => {
             const items = [];
@@ -143,7 +142,7 @@ const searchMeesho = async (query) => {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         const url = `https://www.meesho.com/search?q=${encodeURIComponent(query)}`;
         
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
         const results = await page.evaluate(() => {
             const items = [];
@@ -194,7 +193,7 @@ const searchMeesho = async (query) => {
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             const url = `https://www.croma.com/searchB?q=${encodeURIComponent(query)}:relevance`;
             
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
             
             const results = await page.evaluate(() => {
                 const items = [];
@@ -243,7 +242,7 @@ const searchMeesho = async (query) => {
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             const url = `https://www.reliancedigital.in/search?q=${encodeURIComponent(query)}:relevance`;
             
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
             
             const results = await page.evaluate(() => {
                 const items = [];

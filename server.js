@@ -88,20 +88,13 @@ app.get("/products/search-live", async (req, res) => {
         
         let amazon = [], flipkart = [], meesho = [], croma = [], reliance = [];
 
+        amazon = await scraper.searchAmazon(query);
+        flipkart = await scraper.searchFlipkart(query);
+        meesho = await scraper.searchMeesho(query);
+        
         if (isElectronicsSearch) {
-            [amazon, flipkart, meesho, croma, reliance] = await Promise.all([
-                scraper.searchAmazon(query),
-                scraper.searchFlipkart(query),
-                scraper.searchMeesho(query),
-                scraper.searchCroma(query),
-                scraper.searchReliance(query)
-            ]);
-        } else {
-            [amazon, flipkart, meesho] = await Promise.all([
-                scraper.searchAmazon(query),
-                scraper.searchFlipkart(query),
-                scraper.searchMeesho(query)
-            ]);
+            croma = await scraper.searchCroma(query);
+            reliance = await scraper.searchReliance(query);
         }
 
         // Helper function to check if two product titles are likely the same item

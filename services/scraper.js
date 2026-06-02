@@ -7,31 +7,54 @@ const HEADERS = {
 };
 
 const searchAmazon = async (query) => {
+    let page;
     try {
-        const url = `https://www.amazon.in/s?k=${encodeURIComponent(query)}`;
-        const { data } = await axios.get(url, { headers: HEADERS });
-        const $ = cheerio.load(data);
-        const results = [];
-
-        $('.s-result-item[data-component-type="s-search-result"]').slice(0, 20).each((i, el) => {
-            const title = $(el).find('h2 span').text().trim();
-            const priceText = $(el).find('.a-price-whole').first().text().replace(/,/g, '');
-            const imageUrl = $(el).find('img.s-image').attr('src');
-            const link = "https://www.amazon.in" + $(el).find('a.a-link-normal').attr('href');
-
-            if (title && priceText) {
-                results.push({
-                    platform: 'Amazon',
-                    title,
-                    price: parseFloat(priceText),
-                    imageUrl,
-                    url: link
-                });
+        const browser = await getBrowser();
+        page = await browser.newPage();
+        
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
             }
         });
+
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        const url = `https://www.amazon.in/s?k=${encodeURIComponent(query)}`;
+        
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
+        
+        const results = await page.evaluate(() => {
+            const items = [];
+            const cards = document.querySelectorAll('.s-result-item[data-component-type="s-search-result"]');
+            for (let card of cards) {
+                const titleEl = card.querySelector('h2 span');
+                const priceEl = card.querySelector('.a-price-whole');
+                const linkEl = card.querySelector('a.a-link-normal');
+                const imgEl = card.querySelector('img.s-image');
+                
+                if (titleEl && priceEl && linkEl && items.length < 20) {
+                    const title = titleEl.innerText.trim();
+                    const priceText = priceEl.innerText.replace(/,/g, '').trim();
+                    const price = parseFloat(priceText);
+                    const link = "https://www.amazon.in" + linkEl.getAttribute('href');
+                    const imageUrl = imgEl ? imgEl.getAttribute('src') : '';
+                    
+                    if (!isNaN(price) && title) {
+                        items.push({ platform: 'Amazon', title, price, imageUrl, url: link });
+                    }
+                }
+            }
+            return items;
+        });
+        
+        await page.close();
         return results;
     } catch (error) {
         console.error("Amazon search failed:", error.message);
+        if (page) await page.close();
         return [];
     }
 };
@@ -114,7 +137,7 @@ const searchFlipkart = async (query) => {
             return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
         });
         
-        await browser.close();
+        await page.close();
         return results;
     } catch (error) {
         console.error("Flipkart search failed:", error.message);
@@ -170,7 +193,7 @@ const searchMeesho = async (query) => {
             return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
         });
         
-        await browser.close();
+        await page.close();
         return results;
     } catch (error) {
         console.error("Meesho search failed:", error.message);

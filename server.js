@@ -82,6 +82,9 @@ app.get("/products/search-live", async (req, res) => {
     if (!query) return res.status(400).json({ status: "error", message: "Query required" });
 
     try {
+        const startTime = Date.now();
+        const MAX_TIME = 75000; // 75 seconds limit to prevent Render 100s timeout
+
         console.log(`Live searching for: ${query} across Amazon, Flipkart, Meesho, Croma, and Reliance...`);
         const qLowerSearch = query.toLowerCase();
         const isElectronicsSearch = /(laptop|phone|tv|television|dell|apple|samsung|macbook|xps|watch|earbuds|headphones|charger|cable)/i.test(qLowerSearch);
@@ -89,12 +92,31 @@ app.get("/products/search-live", async (req, res) => {
         let amazon = [], flipkart = [], meesho = [], croma = [], reliance = [];
 
         amazon = await scraper.searchAmazon(query);
-        flipkart = await scraper.searchFlipkart(query);
-        meesho = await scraper.searchMeesho(query);
+        
+        if (Date.now() - startTime < MAX_TIME) {
+            flipkart = await scraper.searchFlipkart(query);
+        } else {
+            console.log("Time limit reached, skipping Flipkart");
+        }
+        
+        if (Date.now() - startTime < MAX_TIME) {
+            meesho = await scraper.searchMeesho(query);
+        } else {
+            console.log("Time limit reached, skipping Meesho");
+        }
         
         if (isElectronicsSearch) {
-            croma = await scraper.searchCroma(query);
-            reliance = await scraper.searchReliance(query);
+            if (Date.now() - startTime < MAX_TIME) {
+                croma = await scraper.searchCroma(query);
+            } else {
+                console.log("Time limit reached, skipping Croma");
+            }
+            
+            if (Date.now() - startTime < MAX_TIME) {
+                reliance = await scraper.searchReliance(query);
+            } else {
+                console.log("Time limit reached, skipping Reliance");
+            }
         }
 
         // Helper function to check if two product titles are likely the same item

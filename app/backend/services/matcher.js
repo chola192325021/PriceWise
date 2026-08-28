@@ -553,7 +553,7 @@ function classifyCategory(product) {
 }
 
 // ===========================================================================
-// SECTION 4 — Hard rejection rules
+// SECTION 4 — Hard rejection rules (for completely incompatible products)
 // ===========================================================================
 
 function applyHardRejections(a, b, category) {
@@ -562,7 +562,7 @@ function applyHardRejections(a, b, category) {
         return { reason: `Rejected: Brand mismatch — ${a.brand} ≠ ${b.brand}` };
     }
 
-    // Rule 2: Different product form/type
+    // Rule 2: Different product form/type in same form group (e.g. shampoo vs conditioner, shoes vs boots)
     if (a.variant.productFormGroup && b.variant.productFormGroup) {
         if (a.variant.productForm && b.variant.productForm &&
             a.variant.productFormGroup === b.variant.productFormGroup &&
@@ -571,7 +571,7 @@ function applyHardRejections(a, b, category) {
         }
     }
 
-    // Rule 3: Different model number
+    // Rule 3: Different model number generation (e.g. WH-1000XM5 vs WH-1000XM4)
     if (a.modelNumber && b.modelNumber) {
         const normA = normaliseModelString(a.modelNumber);
         const normB = normaliseModelString(b.modelNumber);
@@ -580,59 +580,11 @@ function applyHardRejections(a, b, category) {
         }
     }
 
-    // Rule 4: Contradictory storage
-    if (a.variant.storageGb !== null && b.variant.storageGb !== null) {
-        if (a.variant.storageGb !== b.variant.storageGb) {
-            return { reason: `Rejected: Storage mismatch — ${a.variant.storageGb} GB ≠ ${b.variant.storageGb} GB` };
-        }
-    }
-
-    // Rule 5: Contradictory RAM
-    if (a.variant.ramGb !== null && b.variant.ramGb !== null) {
-        if (a.variant.ramGb !== b.variant.ramGb) {
-            return { reason: `Rejected: RAM mismatch — ${a.variant.ramGb} GB ≠ ${b.variant.ramGb} GB` };
-        }
-    }
-
-    // Rule 6: Contradictory phone edition
-    if (a.variant.edition !== null && b.variant.edition !== null) {
-        if (a.variant.edition !== b.variant.edition) {
-            return { reason: `Rejected: Phone edition mismatch — ${a.variant.edition} ≠ ${b.variant.edition}` };
-        }
-    }
-    if ((a.variant.edition !== null) !== (b.variant.edition !== null)) {
-        const edA = a.variant.edition || 'base';
-        const edB = b.variant.edition || 'base';
-        if (edA !== edB) {
-            return { reason: `Rejected: Phone edition mismatch — ${edA} ≠ ${edB}` };
-        }
-    }
-
-    // Rule 7: Contradictory capacity
-    if (category === 'grocery_beauty' && a.variant.capacityMl !== null && b.variant.capacityMl !== null) {
-        const diff = Math.abs(a.variant.capacityMl - b.variant.capacityMl);
-        const smaller = Math.min(a.variant.capacityMl, b.variant.capacityMl);
-        const ratio = diff / smaller;
-        if (diff > 10 && ratio < 0.1) {
-            return { reason: `Rejected: Capacity mismatch — ${a.variant.capacityMl} ml ≠ ${b.variant.capacityMl} ml` };
-        }
-    }
-
-    // Rule 8: Contradictory weight
-    if (category === 'grocery_beauty' && a.variant.weightG !== null && b.variant.weightG !== null) {
-        const diff = Math.abs(a.variant.weightG - b.variant.weightG);
-        const smaller = Math.min(a.variant.weightG, b.variant.weightG);
-        const ratio = diff / smaller;
-        if (diff > 10 && ratio < 0.1) {
-            return { reason: `Rejected: Weight mismatch — ${a.variant.weightG} g ≠ ${b.variant.weightG} g` };
-        }
-    }
-
     return null;
 }
 
 // ===========================================================================
-// SECTION 5 — Weighted scoring
+// SECTION 5 — Weighted scoring and 4-tier classification
 // ===========================================================================
 
 const WEIGHTS = {
@@ -649,10 +601,14 @@ function matchProducts(a, b) {
         return {
             matchStatus: 'no_match',
             confidence: 0,
+            comparisonEligible: false,
             matchedAttributes: [],
             differingAttributes: [],
             rejectedAttributes: [],
-            reasons: ['Rejected: One or both products could not be normalised']
+            differences: [],
+            pricePerUnit: null,
+            reasons: ['Rejected: One or both products could not be normalised'],
+            reason: 'One or both products could not be normalised.'
         };
     }
 
@@ -660,18 +616,23 @@ function matchProducts(a, b) {
     const matchedAttributes = [];
     const differingAttributes = [];
     const rejectedAttributes = [];
+    const differences = [];
     const reasons = [];
 
-    // ---- Hard rejections first ----
+    // ---- Hard rejections first (incompatible brand, form, or model number) ----
     const hardReject = applyHardRejections(a, b, category);
     if (hardReject) {
         return {
             matchStatus: 'no_match',
             confidence: 0,
+            comparisonEligible: false,
             matchedAttributes,
             differingAttributes,
             rejectedAttributes: [hardReject.reason],
-            reasons: [hardReject.reason]
+            differences,
+            pricePerUnit: null,
+            reasons: [hardReject.reason],
+            reason: hardReject.reason.replace('Rejected: ', '')
         };
     }
 
@@ -692,6 +653,9 @@ function matchProducts(a, b) {
         }
     }
 
+    const sameBrand = a.brand && b.brand && a.brand === b.brand;
+    const sameForm = a.variant.productForm && b.variant.productForm && a.variant.productForm === b.variant.productForm;
+
     if (a.model && b.model) {
         const normA = normaliseModelString(a.model);
         const normB = normaliseModelString(b.model);
@@ -700,15 +664,18 @@ function matchProducts(a, b) {
             matchedAttributes.push('model');
             reasons.push(`Model matches: ${a.model}`);
         } else if (normA.includes(normB) || normB.includes(normA)) {
-            score += modelWeight * 0.5;
+            score += modelWeight * 0.7;
             reasons.push(`Model partially matches: ${a.model} ~ ${b.model}`);
+        } else if (category === 'grocery_beauty' && sameBrand && sameForm) {
+            score += modelWeight * 0.6;
         } else {
             differingAttributes.push('model');
+            differences.push(`Model differs: ${b.model} instead of ${a.model}`);
             reasons.push(`Model differs: ${a.model} vs ${b.model}`);
         }
     }
 
-    if (a.brand && b.brand && a.brand === b.brand) {
+    if (sameBrand) {
         score += WEIGHTS.brand;
         matchedAttributes.push('brand');
         reasons.push(`Brand matches: ${a.brand}`);
@@ -716,7 +683,7 @@ function matchProducts(a, b) {
         score += WEIGHTS.brand * 0.5;
     }
 
-    if (a.variant.productForm && b.variant.productForm && a.variant.productForm === b.variant.productForm) {
+    if (sameForm) {
         score += WEIGHTS.productType;
         matchedAttributes.push('productType');
         reasons.push(`Product type matches: ${a.variant.productForm}`);
@@ -724,31 +691,122 @@ function matchProducts(a, b) {
         score += WEIGHTS.productType * 0.5;
     }
 
+    // Check critical variants
     let variantScore = 0;
     let variantChecked = 0;
 
-    const checkVariant = (key, labelA, labelB, unitLabel) => {
-        if (labelA !== null && labelB !== null) {
-            variantChecked++;
-            if (labelA === labelB) {
-                variantScore++;
-                matchedAttributes.push(key);
-                reasons.push(`${key} matches: ${labelA}${unitLabel || ''}`);
-            } else {
-                differingAttributes.push(key);
-                reasons.push(`${key} differs: ${labelA}${unitLabel || ''} vs ${labelB}${unitLabel || ''}`);
-            }
+    // Storage
+    if (a.variant.storageGb !== null && b.variant.storageGb !== null) {
+        variantChecked++;
+        if (a.variant.storageGb === b.variant.storageGb) {
+            variantScore++;
+            matchedAttributes.push('storageGb');
+            reasons.push(`Storage matches: ${a.variant.storageGb} GB`);
+        } else {
+            differingAttributes.push('storageGb');
+            differences.push(`Storage differs: ${b.variant.storageGb} GB instead of ${a.variant.storageGb} GB`);
+            reasons.push(`Storage differs: ${b.variant.storageGb} GB instead of ${a.variant.storageGb} GB`);
         }
-    };
+    }
 
-    checkVariant('storageGb', a.variant.storageGb, b.variant.storageGb, ' GB');
-    checkVariant('ramGb', a.variant.ramGb, b.variant.ramGb, ' GB RAM');
-    checkVariant('connectivity', a.variant.connectivity, b.variant.connectivity, '');
-    checkVariant('packCount', a.variant.packCount > 1 ? a.variant.packCount : null,
-                              b.variant.packCount > 1 ? b.variant.packCount : null, ' pack');
-    checkVariant('capacityMl', a.variant.capacityMl, b.variant.capacityMl, ' ml');
-    checkVariant('weightG', a.variant.weightG, b.variant.weightG, ' g');
-    checkVariant('size', a.variant.size, b.variant.size, '');
+    // RAM
+    if (a.variant.ramGb !== null && b.variant.ramGb !== null) {
+        variantChecked++;
+        if (a.variant.ramGb === b.variant.ramGb) {
+            variantScore++;
+            matchedAttributes.push('ramGb');
+            reasons.push(`RAM matches: ${a.variant.ramGb} GB`);
+        } else {
+            differingAttributes.push('ramGb');
+            differences.push(`RAM differs: ${b.variant.ramGb} GB instead of ${a.variant.ramGb} GB`);
+            reasons.push(`RAM differs: ${b.variant.ramGb} GB instead of ${a.variant.ramGb} GB`);
+        }
+    }
+
+    // Phone edition (Ultra, Pro, Plus, Mini, etc.)
+    if (a.variant.edition !== null || b.variant.edition !== null) {
+        const edA = a.variant.edition || 'base';
+        const edB = b.variant.edition || 'base';
+        variantChecked++;
+        if (edA === edB) {
+            variantScore++;
+            matchedAttributes.push('edition');
+        } else {
+            differingAttributes.push('edition');
+            differences.push(`Edition differs: ${edB.toUpperCase()} instead of ${edA.toUpperCase()}`);
+            reasons.push(`Edition differs: ${edB} instead of ${edA}`);
+        }
+    }
+
+    // Capacity (ml / litre)
+    if (a.variant.capacityMl !== null && b.variant.capacityMl !== null) {
+        variantChecked++;
+        if (Math.abs(a.variant.capacityMl - b.variant.capacityMl) <= 10) {
+            variantScore++;
+            matchedAttributes.push('capacityMl');
+            reasons.push(`Capacity matches: ${a.variant.capacityMl} ml`);
+        } else {
+            differingAttributes.push('capacityMl');
+            const capBLabel = b.variant.capacityMl >= 1000 ? `${b.variant.capacityMl / 1000} litre` : `${b.variant.capacityMl} ml`;
+            const capALabel = a.variant.capacityMl >= 1000 ? `${a.variant.capacityMl / 1000} litre` : `${a.variant.capacityMl} ml`;
+            differences.push(`Quantity differs: ${capBLabel} instead of ${capALabel}`);
+            reasons.push(`Capacity differs: ${capBLabel} vs ${capALabel}`);
+        }
+    }
+
+    // Weight (g / kg)
+    if (a.variant.weightG !== null && b.variant.weightG !== null) {
+        variantChecked++;
+        if (Math.abs(a.variant.weightG - b.variant.weightG) <= 10) {
+            variantScore++;
+            matchedAttributes.push('weightG');
+            reasons.push(`Weight matches: ${a.variant.weightG} g`);
+        } else {
+            differingAttributes.push('weightG');
+            const wtBLabel = b.variant.weightG >= 1000 ? `${b.variant.weightG / 1000} kg` : `${b.variant.weightG} g`;
+            const wtALabel = a.variant.weightG >= 1000 ? `${a.variant.weightG / 1000} kg` : `${a.variant.weightG} g`;
+            differences.push(`Quantity differs: ${wtBLabel} instead of ${wtALabel}`);
+            reasons.push(`Weight differs: ${wtBLabel} vs ${wtALabel}`);
+        }
+    }
+
+    // Pack Count
+    const packA = a.variant.packCount || 1;
+    const packB = b.variant.packCount || 1;
+    if (packA > 1 || packB > 1) {
+        variantChecked++;
+        if (packA === packB) {
+            variantScore++;
+            matchedAttributes.push('packCount');
+        } else {
+            differingAttributes.push('packCount');
+            differences.push(`Pack size differs: Pack of ${packB} instead of Pack of ${packA}`);
+            reasons.push(`Pack size differs: Pack of ${packB} vs Pack of ${packA}`);
+        }
+    }
+
+    // Size (footwear / apparel)
+    if (a.variant.size !== null && b.variant.size !== null) {
+        variantChecked++;
+        if (a.variant.size === b.variant.size) {
+            variantScore++;
+            matchedAttributes.push('size');
+        } else {
+            differingAttributes.push('size');
+            differences.push(`Size differs: Size ${b.variant.size} instead of Size ${a.variant.size}`);
+            reasons.push(`Size differs: ${b.variant.size} vs ${a.variant.size}`);
+        }
+    }
+
+    // Connectivity (5G vs 4G)
+    if (a.variant.connectivity && b.variant.connectivity) {
+        if (a.variant.connectivity === b.variant.connectivity) {
+            matchedAttributes.push('connectivity');
+        } else {
+            differingAttributes.push('connectivity');
+            differences.push(`Connectivity differs: ${b.variant.connectivity.toUpperCase()} instead of ${a.variant.connectivity.toUpperCase()}`);
+        }
+    }
 
     if (variantChecked > 0) {
         score += WEIGHTS.criticalVariant * (variantScore / variantChecked);
@@ -762,81 +820,225 @@ function matchProducts(a, b) {
         reasons.push(`Title similarity: ${Math.round(titleSim * 100)}%`);
     }
 
+    // Color check
     const colorDiffers = a.variant.color && b.variant.color && a.variant.color !== b.variant.color;
     if (colorDiffers) {
         differingAttributes.push('color');
-        reasons.push(`Colour differs: ${a.variant.color} vs ${b.variant.color}`);
+        differences.push(`Colour differs: ${b.variant.color} instead of ${a.variant.color}`);
+        reasons.push(`Colour differs: ${b.variant.color} vs ${a.variant.color}`);
     } else if (a.variant.color && b.variant.color && a.variant.color === b.variant.color) {
         matchedAttributes.push('color');
         reasons.push(`Colour matches: ${a.variant.color}`);
     }
 
-    const sameBrand = a.brand && b.brand && a.brand === b.brand;
-    const sameForm = a.variant.productForm && b.variant.productForm
-        && a.variant.productForm === b.variant.productForm;
     const sameModelLine = a.model && b.model && normaliseModelString(a.model) === normaliseModelString(b.model);
-    const sameProductLine = sameBrand && (sameForm || sameModelLine);
+    const sameProductLine = sameBrand && (sameForm || sameModelLine || (!a.variant.productForm && !b.variant.productForm));
 
-    const capacityDiffers = a.variant.capacityMl !== null && b.variant.capacityMl !== null &&
-                            Math.abs(a.variant.capacityMl - b.variant.capacityMl) > 10;
-    const weightDiffers = a.variant.weightG !== null && b.variant.weightG !== null &&
-                          Math.abs(a.variant.weightG - b.variant.weightG) > 10;
-    const packDiffers = a.variant.packCount !== b.variant.packCount &&
-                        (a.variant.packCount > 1 || b.variant.packCount > 1);
-    const quantityDiffers = capacityDiffers || weightDiffers || packDiffers;
+    // Determine if ONLY quantity/capacity/weight/packCount differs
+    const nonQuantityDiffs = differingAttributes.filter(d => !['capacityMl', 'weightG', 'packCount', 'color'].includes(d));
+    const hasQuantityDiff = differingAttributes.some(d => ['capacityMl', 'weightG', 'packCount'].includes(d));
 
-    if (sameProductLine && quantityDiffers) {
-        let unitPriceA = null, unitPriceB = null, unitLabel = null;
+    // Unit price calculation
+    let unitPriceA = null, unitPriceB = null, unitLabel = null, pricePerUnit = null;
+    if (sameProductLine && hasQuantityDiff && nonQuantityDiffs.length === 0) {
         if (a.variant.capacityMl && b.variant.capacityMl && a.price && b.price) {
             unitPriceA = Math.round(a.price / (a.variant.capacityMl / 1000) * 100) / 100;
             unitPriceB = Math.round(b.price / (b.variant.capacityMl / 1000) * 100) / 100;
             unitLabel = '₹/litre';
+            pricePerUnit = { value: unitPriceB, unit: 'litre' };
         } else if (a.variant.weightG && b.variant.weightG && a.price && b.price) {
             unitPriceA = Math.round(a.price / (a.variant.weightG / 1000) * 100) / 100;
             unitPriceB = Math.round(b.price / (b.variant.weightG / 1000) * 100) / 100;
             unitLabel = '₹/kg';
-        } else if (a.price && b.price) {
-            unitPriceA = Math.round(a.price / a.variant.packCount * 100) / 100;
-            unitPriceB = Math.round(b.price / b.variant.packCount * 100) / 100;
+            pricePerUnit = { value: unitPriceB, unit: 'kg' };
+        } else if ((packA > 1 || packB > 1) && a.price && b.price) {
+            unitPriceA = Math.round(a.price / packA * 100) / 100;
+            unitPriceB = Math.round(b.price / packB * 100) / 100;
             unitLabel = '₹/item';
+            pricePerUnit = { value: unitPriceB, unit: 'item' };
         }
-        return {
-            matchStatus: 'unit_price_only',
-            confidence: Math.round(score * 100) / 100,
-            matchedAttributes,
-            differingAttributes,
-            rejectedAttributes,
-            reasons: [...reasons, 'Comparable product line, different quantity'],
-            unitPriceA,
-            unitPriceB,
-            unitLabel
-        };
     }
 
-    const onlyColorDiffers = differingAttributes.length === 1 && differingAttributes[0] === 'color';
-    const noConflicts = differingAttributes.length === 0 || onlyColorDiffers;
-
+    // -----------------------------------------------------------------------
+    // Classification Logic (exact_match > unit_price_only > variant_match > no_match)
+    // -----------------------------------------------------------------------
     let matchStatus;
-    if (score >= 0.88 && noConflicts && !colorDiffers) {
+    let comparisonEligible = false;
+    let mainReason = '';
+
+    const criticalSpecsMismatch = differingAttributes.filter(d => d !== 'color').length > 0;
+
+    if (sameProductLine && hasQuantityDiff && nonQuantityDiffs.length === 0 && pricePerUnit) {
+        matchStatus = 'unit_price_only';
+        comparisonEligible = false;
+        mainReason = `Different quantity — price per ${pricePerUnit.unit} shown.`;
+    } else if (score >= 0.78 && !criticalSpecsMismatch && !colorDiffers) {
         matchStatus = 'exact_match';
-    } else if (score >= 0.80 && onlyColorDiffers) {
+        comparisonEligible = true;
+        mainReason = 'Same brand, model, and required specifications.';
+    } else if (sameBrand && (sameModelLine || score >= 0.45) && differingAttributes.length > 0) {
         matchStatus = 'variant_match';
-    } else if (score >= 0.78 && noConflicts) {
-        matchStatus = 'exact_match';
-    } else if (score >= 0.68) {
+        comparisonEligible = false;
+        mainReason = `Similar variant — ${differences[0] || 'Variant differs from reference.'}`;
+    } else if (score >= 0.65) {
         matchStatus = 'variant_match';
+        comparisonEligible = false;
+        mainReason = `Similar variant — ${differences[0] || 'Specification differs.'}`;
     } else {
         matchStatus = 'no_match';
+        comparisonEligible = false;
+        mainReason = `No exact match on ${b.source || (b._raw && b._raw.platform) || 'store'}.`;
         reasons.push(`Rejected: Insufficient similarity (score ${Math.round(score * 100)}%)`);
     }
 
     return {
         matchStatus,
         confidence: Math.round(score * 100) / 100,
+        comparisonEligible,
         matchedAttributes,
         differingAttributes,
         rejectedAttributes,
-        reasons
+        differences,
+        pricePerUnit,
+        unitPriceA,
+        unitPriceB,
+        unitLabel,
+        reasons,
+        reason: mainReason
+    };
+}
+
+/**
+ * Selects the single best candidate from a platform and returns a structured platform result.
+ * Selection priority:
+ *   1. Best exact_match
+ *   2. Best unit_price_only (same core product, quantity differs)
+ *   3. Best variant_match
+ *   4. no_match (if no candidates or all unrelated)
+ *
+ * @param {Object} queryProduct - Reference normalized product
+ * @param {Array<Object>} candidates - Scraped/catalog product candidates
+ * @param {String} sourceName - Platform name (e.g. 'Amazon', 'Flipkart')
+ * @returns {Object} Structured platform result
+ */
+function selectBestPlatformResult(queryProduct, candidates = [], sourceName = '') {
+    const defaultSource = sourceName || 'Online Store';
+
+    if (!queryProduct) {
+        return {
+            source: defaultSource,
+            status: 'no_match',
+            comparisonEligible: false,
+            confidence: 0,
+            product: null,
+            differences: [],
+            pricePerUnit: null,
+            reason: `No reference product available for ${defaultSource}.`
+        };
+    }
+
+    const normQuery = queryProduct.normalizedTitle ? queryProduct : normalizeProduct(queryProduct);
+    const sourceLower = defaultSource.toLowerCase().trim();
+
+    // Filter candidate products belonging to this source
+    const storeCandidates = (Array.isArray(candidates) ? candidates : [])
+        .filter(c => {
+            if (!c) return false;
+            const candSource = (c.source || (c._raw && c._raw.platform) || c.platform || '').toLowerCase().trim();
+            return !sourceLower || candSource === sourceLower || candSource.includes(sourceLower) || sourceLower.includes(candSource);
+        })
+        .map(c => (c.normalizedTitle ? c : { ...normalizeProduct(c), _raw: c }))
+        .filter(c => c.price > 0 && (c.cleanTitle || c.title));
+
+    if (storeCandidates.length === 0) {
+        return {
+            source: defaultSource,
+            status: 'no_match',
+            comparisonEligible: false,
+            confidence: 0,
+            product: null,
+            differences: [],
+            pricePerUnit: null,
+            reason: `No relevant product found on ${defaultSource}.`
+        };
+    }
+
+    // Match each candidate against queryProduct
+    const scoredList = storeCandidates.map(cand => {
+        const matchResult = matchProducts(normQuery, cand);
+        return {
+            cand,
+            matchResult,
+            status: matchResult.matchStatus,
+            confidence: matchResult.confidence || 0,
+            price: cand.price || 0
+        };
+    });
+
+    const exactMatches = scoredList.filter(s => s.status === 'exact_match');
+    const unitPriceMatches = scoredList.filter(s => s.status === 'unit_price_only');
+    const variantMatches = scoredList.filter(s => s.status === 'variant_match');
+
+    let selected = null;
+
+    if (exactMatches.length > 0) {
+        // Sort exact matches by price ascending (cheapest exact price first)
+        exactMatches.sort((a, b) => a.price - b.price);
+        selected = exactMatches[0];
+    } else if (unitPriceMatches.length > 0) {
+        // Sort unit price matches by confidence descending
+        unitPriceMatches.sort((a, b) => b.confidence - a.confidence);
+        selected = unitPriceMatches[0];
+    } else if (variantMatches.length > 0) {
+        // Sort variant matches by confidence descending
+        variantMatches.sort((a, b) => b.confidence - a.confidence);
+        selected = variantMatches[0];
+    }
+
+    if (!selected) {
+        return {
+            source: defaultSource,
+            status: 'no_match',
+            comparisonEligible: false,
+            confidence: 0,
+            product: null,
+            differences: [],
+            pricePerUnit: null,
+            reason: `No exact match on ${defaultSource}.`
+        };
+    }
+
+    const { cand, matchResult } = selected;
+    const cleanTitleDisplay = cand.cleanTitle || cand.title || (cand._raw && cand._raw.title) || '';
+
+    return {
+        source: defaultSource,
+        status: matchResult.matchStatus,
+        comparisonEligible: matchResult.comparisonEligible,
+        confidence: matchResult.confidence,
+        product: {
+            title: cleanTitleDisplay,
+            price: cand.price,
+            currency: 'INR',
+            url: cand.url || '',
+            imageUrl: cand.imageUrl || (cand._raw && cand._raw.imageUrl) || '',
+            available: true,
+            brand: cand.brand || '',
+            model: cand.model || '',
+            attributes: {
+                storageGb: cand.variant.storageGb,
+                ramGb: cand.variant.ramGb,
+                capacityMl: cand.variant.capacityMl,
+                weightG: cand.variant.weightG,
+                packCount: cand.variant.packCount,
+                quantity: cand.variant.packCount || 1,
+                size: cand.variant.size,
+                color: cand.variant.color
+            }
+        },
+        differences: matchResult.differences || [],
+        pricePerUnit: matchResult.pricePerUnit || null,
+        reason: matchResult.reason
     };
 }
 
@@ -990,6 +1192,7 @@ module.exports = {
     normalizeProduct,
     classifyCategory,
     matchProducts,
+    selectBestPlatformResult,
     findSimilarProducts,
     logDiagnostics,
     cleanTitle,

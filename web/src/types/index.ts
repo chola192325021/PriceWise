@@ -18,6 +18,11 @@ export interface AlertItem {
 /** Structured match result for a platform listing vs. the reference listing. */
 export type MatchStatus = 'exact_match' | 'variant_match' | 'unit_price_only' | 'no_match' | 'reference';
 
+export interface PricePerUnit {
+  value: number;
+  unit: string;
+}
+
 export interface Platform {
   name: string;
   price: number;
@@ -25,23 +30,48 @@ export interface Platform {
   url: string;
   isSmartDeal: boolean;
   /** The actual listing title on this platform (may differ from the query title) */
-  productTitle?: string;
+  productTitle?: string | null;
   /** Clean title extracted without UI artifacts */
-  cleanTitle?: string;
-  rawTitle?: string;
+  cleanTitle?: string | null;
+  rawTitle?: string | null;
   /** How well this platform listing matches the reference listing */
   matchStatus?: MatchStatus;
+  status?: MatchStatus;
   matchConfidence?: number;
+  confidence?: number;
   matchedAttributes?: string[];
   differingAttributes?: string[];
   differences?: string[];
   matchReasons?: string[];
+  reason?: string;
   /** Flag indicating if this platform is eligible for exact price comparison */
   comparisonEligible?: boolean;
   /** Unit price fields — populated for unit_price_only matches */
+  pricePerUnit?: PricePerUnit | null;
   unitPriceA?: number | null;
   unitPriceB?: number | null;
   unitLabel?: string | null;
+}
+
+export interface PlatformResult {
+  source: string;
+  status: MatchStatus;
+  comparisonEligible: boolean;
+  confidence: number;
+  product: {
+    title: string;
+    price: number;
+    currency: string;
+    url: string;
+    imageUrl: string;
+    available: boolean;
+    brand?: string;
+    model?: string;
+    attributes?: Record<string, any>;
+  } | null;
+  differences: string[];
+  pricePerUnit: PricePerUnit | null;
+  reason: string;
 }
 
 export interface SimilarProduct {
@@ -93,12 +123,19 @@ export interface Product {
   category: string;
   imageUrl: string;
   platforms: Platform[];
+  platformResults?: PlatformResult[];
+  bestExactPrice?: { source: string; price: number } | null;
   similarProducts?: SimilarProduct[];
   noExactMatchMessage?: string | null;
   price_history?: PriceHistoryItem[];
   aiPrediction: AiPrediction;
   /** Structured comparison summary — tells UI how safe it is to compare prices */
   comparisonSummary?: ComparisonSummary;
+  query?: {
+    title: string;
+    cleanTitle?: string;
+    normalizedTitle?: string;
+  };
 }
 
 export interface LoginResponse {

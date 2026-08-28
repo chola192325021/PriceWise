@@ -19,8 +19,9 @@ import {
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const displayTitle = product.cleanTitle || product.title;
-  const eligiblePlatforms = product.platforms.filter(p => p.comparisonEligible !== false);
-  const cheapestPlatform = eligiblePlatforms.find((p) => p.isSmartDeal) || eligiblePlatforms[0] || product.platforms[0];
+  const exactPlatforms = (product.platforms || []).filter(p => (p.status || p.matchStatus) === 'exact_match' && p.price > 0);
+  const cheapestPlatform = exactPlatforms.find((p) => p.isSmartDeal) || exactPlatforms[0] || (product.platforms || [])[0];
+  const displayPrice = product.bestExactPrice ? product.bestExactPrice.price : (cheapestPlatform?.price || 0);
   const similarCount = product.similarProducts?.length || 0;
 
   return (
@@ -34,9 +35,9 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           alt={displayTitle}
           className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
         />
-        {cheapestPlatform && (
+        {exactPlatforms.length > 0 && (
           <div className="absolute top-2 left-2 bg-green-600 dark:bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">
-            Smart Deal
+            Exact Match
           </div>
         )}
         {similarCount > 0 && (
@@ -51,9 +52,9 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
 
         <div className="mt-auto pt-4 flex items-baseline justify-between">
           <div>
-            <span className="text-lg font-bold text-blue-600 dark:text-blue-400">₹{cheapestPlatform?.price.toLocaleString()}</span>
-            {eligiblePlatforms.length > 1 && (
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 block">Lowest among {eligiblePlatforms.length} exact stores</span>
+            <span className="text-lg font-bold text-blue-600 dark:text-blue-400">₹{displayPrice.toLocaleString()}</span>
+            {exactPlatforms.length > 1 && (
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 block">Lowest among {exactPlatforms.length} exact stores</span>
             )}
           </div>
 

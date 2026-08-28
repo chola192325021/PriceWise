@@ -174,12 +174,124 @@ describe('PriceWise Web Feature & Theme Accessibility Tests', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Samsung Galaxy S24 256GB' })).toBeDefined();
     expect(screen.queryByText(/Add to Compare Samsung/i)).toBeNull();
 
-    // Should show Exact Matches section header
-    expect(screen.getByText(/Exact Matches \(2\)/i)).toBeDefined();
+    // Should show Store Comparisons section header with exact count
+    expect(screen.getByText(/Store Comparisons \(2\)/i)).toBeDefined();
+
+    // Should show Exact Match badge
+    expect(screen.getAllByText(/Exact match/i).length).toBeGreaterThan(0);
 
     // Should show Similar Products section with difference note
     expect(screen.getByText(/Similar Products \(1\)/i)).toBeDefined();
     expect(screen.getByText(/Storage differs: 128GB instead of 256GB/i)).toBeDefined();
     expect(screen.getByText(/Similar Variant/i)).toBeDefined();
+  });
+
+  it('renders all 4 platform match status badge types correctly on ProductDetailPage', async () => {
+    const mockMultiStatusProduct = {
+      _id: 'prod_multi_1',
+      title: 'Dove Intense Repair Shampoo 650ml',
+      cleanTitle: 'Dove Intense Repair Shampoo 650ml',
+      brand: 'Dove',
+      category: 'Beauty',
+      imageUrl: 'https://example.com/dove.jpg',
+      bestExactPrice: { source: 'Amazon', price: 349 },
+      platforms: [
+        {
+          name: 'Amazon',
+          price: 349,
+          url: 'https://amazon.in/dove650',
+          isSmartDeal: true,
+          status: 'exact_match',
+          matchStatus: 'exact_match',
+          comparisonEligible: true,
+          differences: [],
+          reason: 'Same brand, model, and required specifications.'
+        },
+        {
+          name: 'Flipkart',
+          price: 199,
+          url: 'https://flipkart.com/dove340',
+          isSmartDeal: false,
+          status: 'unit_price_only',
+          matchStatus: 'unit_price_only',
+          comparisonEligible: false,
+          pricePerUnit: { value: 58.53, unit: '100ml' },
+          differences: ['Quantity differs: 340 ml instead of 650 ml'],
+          reason: 'Different quantity — price per 100ml shown.'
+        },
+        {
+          name: 'Croma',
+          price: 399,
+          url: 'https://croma.com/dove-cond',
+          isSmartDeal: false,
+          status: 'variant_match',
+          matchStatus: 'variant_match',
+          comparisonEligible: false,
+          differences: ['Product form differs: Conditioner instead of Shampoo'],
+          reason: 'Similar variant — Product form differs: Conditioner instead of Shampoo'
+        },
+        {
+          name: 'Meesho',
+          price: 0,
+          url: 'https://meesho.com/search?q=dove',
+          isSmartDeal: false,
+          status: 'no_match',
+          matchStatus: 'no_match',
+          comparisonEligible: false,
+          differences: [],
+          reason: 'No exact match on Meesho.'
+        }
+      ],
+      similarProducts: [],
+      aiPrediction: {
+        status: 'drop',
+        trend: 'drop',
+        expectedPrice: 320,
+        currentBestPrice: 349,
+        bestPlatform: 'Amazon',
+        observedLowPrice: 320,
+        historyDays: 14,
+        recommendation: 'BUY_NOW',
+        confidence: 0.85,
+        confidenceLabel: 'High',
+        message: 'Great price today',
+        reason: 'Historical low'
+      }
+    };
+
+    const apiClient = (await import('../api/client')).default;
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (url.includes('/products/prod_multi_1') || url === '/products') {
+        return {
+          status: 200,
+          data: { status: 'success', data: mockMultiStatusProduct }
+        } as any;
+      }
+      return { status: 200, data: { status: 'success', data: [] } } as any;
+    });
+
+    await act(async () => {
+      renderWithMemoryRouter(
+        <Routes>
+          <Route path="/product/:id" element={<ProductDetailPage />} />
+        </Routes>,
+        ['/product/prod_multi_1']
+      );
+    });
+
+    // 🟢 Exact match badge
+    expect(screen.getByText(/🟢 Exact match/i)).toBeDefined();
+
+    // 🟠 Different quantity badge & unit price
+    expect(screen.getByText(/🟠 Different quantity/i)).toBeDefined();
+    expect(screen.getByText(/Unit price: ₹58.53 per 100ml/i)).toBeDefined();
+
+    // 🟡 Similar variant badge & difference
+    expect(screen.getByText(/🟡 Similar variant/i)).toBeDefined();
+    expect(screen.getByText(/Product form differs: Conditioner instead of Shampoo/i)).toBeDefined();
+
+    // 🔴 No match on Meesho
+    expect(screen.getByText(/🔴 No exact match on Meesho/i)).toBeDefined();
+    expect(screen.getByText(/No exact match on Meesho\./i)).toBeDefined();
   });
 });

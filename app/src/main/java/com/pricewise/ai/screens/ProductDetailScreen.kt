@@ -50,8 +50,9 @@ fun ProductDetailScreen(
     }
 
     val displayTitle = product.cleanTitle ?: product.title
-    val eligiblePlatforms = product.platforms.filter { it.comparisonEligible != false }
-    val smartDeal = eligiblePlatforms.find { it.isSmartDeal } ?: eligiblePlatforms.firstOrNull() ?: product.platforms.first()
+    val exactPlatforms = product.platforms.filter { (it.status ?: it.matchStatus) == "exact_match" && it.price > 0 }
+    val allPlatforms = product.platforms
+    val smartDeal = exactPlatforms.find { it.isSmartDeal } ?: exactPlatforms.firstOrNull() ?: allPlatforms.find { it.price > 0 } ?: allPlatforms.firstOrNull()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -129,7 +130,7 @@ fun ProductDetailScreen(
                     Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Smart Choice", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(if (exactPlatforms.isNotEmpty()) "Exact Match" else "Verified Deal", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -139,11 +140,16 @@ fun ProductDetailScreen(
             // Title and Price
             Text(displayTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("₹${smartDeal.price}", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("₹${smartDeal.price * 1.1}", style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("10% OFF", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                val bestPrice = product.bestExactPrice?.price ?: smartDeal?.price ?: 0.0
+                if (bestPrice > 0) {
+                    Text("₹${bestPrice.toLong()}", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("₹${(bestPrice * 1.1).toLong()}", style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (product.bestExactPrice != null) "Lowest Exact" else "Best Price", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                } else {
+                    Text("No exact price", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -205,14 +211,14 @@ fun ProductDetailScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Exact Matches Section
+            // Store Comparisons Section
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Exact Matches (${eligiblePlatforms.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
-                Text("Identical Product", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                Text("Store Comparisons (${allPlatforms.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+                Text("${exactPlatforms.size} Exact Matches", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             }
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -237,7 +243,7 @@ fun ProductDetailScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            eligiblePlatforms.forEach { platform ->
+            allPlatforms.forEach { platform ->
                 PlatformRow(platform = platform, productTitle = displayTitle)
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -357,10 +363,10 @@ fun MatchStatusChip(matchStatus: String?) {
         return
     }
     val (chipColor, chipText) = when (matchStatus) {
-        "exact_match" -> Pair(MaterialTheme.colorScheme.tertiaryContainer, "✓ Exact match")
-        "variant_match" -> Pair(MaterialTheme.colorScheme.secondaryContainer, "⚠ Similar variant")
-        "unit_price_only" -> Pair(MaterialTheme.colorScheme.surfaceVariant, "↔ Different quantity")
-        "no_match" -> Pair(MaterialTheme.colorScheme.errorContainer, "✕ No exact match")
+        "exact_match" -> Pair(MaterialTheme.colorScheme.tertiaryContainer, "🟢 Exact match")
+        "variant_match" -> Pair(MaterialTheme.colorScheme.secondaryContainer, "🟡 Similar variant")
+        "unit_price_only" -> Pair(MaterialTheme.colorScheme.surfaceVariant, "🟠 Different quantity")
+        "no_match" -> Pair(MaterialTheme.colorScheme.errorContainer, "🔴 No exact match")
         else -> Pair(MaterialTheme.colorScheme.surfaceVariant, matchStatus)
     }
     val chipTextColor = when (matchStatus) {
@@ -386,49 +392,53 @@ fun MatchStatusChip(matchStatus: String?) {
 @Composable
 fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String = "") {
     val context = LocalContext.current
+    val status = platform.status ?: platform.matchStatus ?: "exact_match"
+    val isNoMatch = status == "no_match" || platform.price <= 0.0
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                try {
-                    val rawUrl = platform.url
-                    val validUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
-                    val uri = Uri.parse(validUrl)
-                    var opened = false
+                if (platform.url.isNotBlank()) {
+                    try {
+                        val rawUrl = platform.url
+                        val validUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
+                        val uri = Uri.parse(validUrl)
+                        var opened = false
 
-                    // Try launching store app if available
-                    val appPackage = when {
-                        platform.name.equals("Flipkart", ignoreCase = true) -> "com.flipkart.android"
-                        platform.name.equals("Meesho", ignoreCase = true) -> "com.meesho.supply"
-                        platform.name.equals("Amazon", ignoreCase = true) -> "in.amazon.mShop.android.shopping"
-                        platform.name.equals("AJIO", ignoreCase = true) -> "com.ril.ajio"
-                        platform.name.equals("Myntra", ignoreCase = true) -> "com.myntra.android"
-                        else -> null
-                    }
-
-                    if (appPackage != null) {
-                        try {
-                            val appIntent = Intent(Intent.ACTION_VIEW, uri).apply { setPackage(appPackage) }
-                            context.startActivity(appIntent)
-                            opened = true
-                        } catch (_: Exception) {}
-                    }
-
-                    if (!opened) {
-                        try {
-                            val browserIntent = Intent(Intent.ACTION_VIEW, uri)
-                            context.startActivity(browserIntent)
-                        } catch (e2: Exception) {
-                            android.widget.Toast.makeText(context, "Cannot open link: ${platform.name}", android.widget.Toast.LENGTH_SHORT).show()
+                        val appPackage = when {
+                            platform.name.equals("Flipkart", ignoreCase = true) -> "com.flipkart.android"
+                            platform.name.equals("Meesho", ignoreCase = true) -> "com.meesho.supply"
+                            platform.name.equals("Amazon", ignoreCase = true) -> "in.amazon.mShop.android.shopping"
+                            platform.name.equals("AJIO", ignoreCase = true) -> "com.ril.ajio"
+                            platform.name.equals("Myntra", ignoreCase = true) -> "com.myntra.android"
+                            else -> null
                         }
+
+                        if (appPackage != null) {
+                            try {
+                                val appIntent = Intent(Intent.ACTION_VIEW, uri).apply { setPackage(appPackage) }
+                                context.startActivity(appIntent)
+                                opened = true
+                            } catch (_: Exception) {}
+                        }
+
+                        if (!opened) {
+                            try {
+                                val browserIntent = Intent(Intent.ACTION_VIEW, uri)
+                                context.startActivity(browserIntent)
+                            } catch (e2: Exception) {
+                                android.widget.Toast.makeText(context, "Cannot open link: ${platform.name}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "Cannot open link: ${platform.name}", android.widget.Toast.LENGTH_SHORT).show()
                     }
-                } catch (e: Exception) {
-                    android.widget.Toast.makeText(context, "Cannot open link: ${platform.name}", android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = if (isNoMatch) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
         )
     ) {
@@ -444,10 +454,21 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(platform.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(platform.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    if (platform.isSmartDeal) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text("Lowest Deal", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                        }
+                    }
+                }
                 // Show the actual listing title if it differs from the product title
-                val listingTitle = platform.productTitle
-                if (!listingTitle.isNullOrBlank() && listingTitle != productTitle) {
+                val listingTitle = platform.cleanTitle ?: platform.productTitle
+                if (!listingTitle.isNullOrBlank() && listingTitle != productTitle && !isNoMatch) {
                     Text(
                         "Listed as: ${listingTitle.take(60)}${if (listingTitle.length > 60) "…" else ""}",
                         fontSize = 10.sp,
@@ -456,30 +477,48 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                MatchStatusChip(matchStatus = platform.matchStatus)
-                // Show differing attributes if any
-                val diffAttrs = platform.differingAttributes
-                if (!diffAttrs.isNullOrEmpty()) {
+                MatchStatusChip(matchStatus = status)
+
+                // Show differences if any
+                val differences = platform.differences
+                if (!differences.isNullOrEmpty()) {
                     Text(
-                        "Differs: ${diffAttrs.joinToString(", ") { it.replace(Regex("([A-Z])"), " $1").trim() }}",
+                        differences.joinToString(" • "),
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                // Show reason if no match
+                if (isNoMatch && !platform.reason.isNullOrBlank()) {
+                    Text(
+                        platform.reason,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Column(horizontalAlignment = Alignment.End) {
-                Text("₹${platform.price.toLong()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                // Show unit price for unit_price_only matches
-                if (platform.matchStatus == "unit_price_only" && platform.unitPriceB != null && platform.unitLabel != null) {
-                    Text(
-                        "₹${platform.unitPriceB} ${platform.unitLabel}",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            if (!isNoMatch) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("₹${platform.price.toLong()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    // Show unit price for unit_price_only matches
+                    val unitPrice = platform.pricePerUnit?.value ?: platform.unitPriceB
+                    val unitLabel = platform.pricePerUnit?.unit ?: platform.unitLabel?.replace("₹/", "")
+                    if (unitPrice != null && unitLabel != null) {
+                        Text(
+                            "₹$unitPrice / $unitLabel",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
+            } else {
+                Text("—", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(modifier = Modifier.width(8.dp))
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

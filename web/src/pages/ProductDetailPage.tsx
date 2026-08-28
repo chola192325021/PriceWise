@@ -176,27 +176,28 @@ const PredictionCard: React.FC<{ prediction: Product['aiPrediction'] }> = ({ pre
 /**
  * Shows a color-coded inline badge for a platform's match status.
  */
-const MatchStatusBadge: React.FC<{ platform: Platform; referenceTitle: string }> = ({ platform, referenceTitle }) => {
-  if (!platform.matchStatus || platform.matchStatus === 'reference') {
+const MatchStatusBadge: React.FC<{ platform: Platform; referenceTitle: string }> = ({ platform }) => {
+  const status = platform.status || platform.matchStatus;
+  if (!status || status === 'reference') {
     return <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">Reference listing</span>;
   }
 
   const configs: Record<MatchStatus, { label: string; className: string }> = {
     exact_match: {
-      label: '✓ Exact match',
+      label: '🟢 Exact match',
       className: 'bg-green-100 dark:bg-green-950/60 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
     },
     variant_match: {
-      label: '⚠ Similar variant',
+      label: '🟡 Similar variant',
       className: 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
     },
     unit_price_only: {
-      label: '↔ Different quantity',
+      label: '🟠 Different quantity',
       className: 'bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800'
     },
     no_match: {
-      label: '✕ No exact match',
-      className: 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+      label: `🔴 No exact match on ${platform.name}`,
+      className: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
     },
     reference: {
       label: 'Reference',
@@ -204,22 +205,43 @@ const MatchStatusBadge: React.FC<{ platform: Platform; referenceTitle: string }>
     }
   };
 
-  const cfg = configs[platform.matchStatus];
-  if (!cfg) return null;
+  const cfg = configs[status] || configs.no_match;
+
+  const unitPrice = platform.pricePerUnit?.value ?? platform.unitPriceB;
+  const unitName = platform.pricePerUnit?.unit ?? (platform.unitLabel ? platform.unitLabel.replace('₹/', '') : null);
 
   return (
     <div className="mt-1.5 space-y-1">
-      <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${cfg.className}`}>
-        {cfg.label}
-      </span>
-      {platform.differingAttributes && platform.differingAttributes.length > 0 && (
-        <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
-          Differs: {platform.differingAttributes.map(a => a.replace(/([A-Z])/g, ' $1').trim()).join(', ')}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`inline-block text-[11px] font-bold px-2.5 py-0.5 rounded-full ${cfg.className}`}>
+          {cfg.label}
+        </span>
+        {(status === 'variant_match' || status === 'unit_price_only') && (
+          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+            Not included in exact comparison
+          </span>
+        )}
+      </div>
+
+      {platform.differences && platform.differences.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {platform.differences.map((diff, i) => (
+            <span key={i} className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 px-2 py-0.5 rounded-md font-medium">
+              {diff}
+            </span>
+          ))}
         </div>
       )}
-      {platform.unitLabel && platform.unitPriceB !== undefined && platform.unitPriceB !== null && (
-        <div className="text-[10px] text-slate-500 dark:text-slate-400">
-          Unit price: ₹{platform.unitPriceB.toLocaleString()} {platform.unitLabel}
+
+      {unitPrice && unitName && (
+        <div className="text-[11px] font-semibold text-orange-700 dark:text-orange-300 mt-1">
+          Unit price: ₹{unitPrice.toLocaleString()} per {unitName}
+        </div>
+      )}
+
+      {status === 'no_match' && platform.reason && (
+        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+          {platform.reason}
         </div>
       )}
     </div>
@@ -456,8 +478,10 @@ const ProductDetailPage: React.FC = () => {
     price: h.price
   })) || [];
 
-  const eligiblePlatforms = (product.platforms || []).filter(p => p.comparisonEligible !== false);
-  const cheapestPlatform = eligiblePlatforms.find(p => p.isSmartDeal) || eligiblePlatforms[0] || (product.platforms && product.platforms[0]);
+  const exactPlatforms = (product.platforms || []).filter(p => (p.status || p.matchStatus) === 'exact_match' && p.price > 0);
+  const bestExactPrice = product.bestExactPrice || (exactPlatforms.length > 0 ? { source: exactPlatforms[0].name, price: exactPlatforms[0].price } : null);
+  const allPlatforms = product.platforms || [];
+  const cheapestPlatform = exactPlatforms.find(p => p.isSmartDeal) || exactPlatforms[0] || allPlatforms.find(p => p.price > 0) || allPlatforms[0];
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -532,12 +556,24 @@ const ProductDetailPage: React.FC = () => {
             <div className="text-sm text-blue-600 dark:text-blue-400 font-bold uppercase tracking-widest mb-2">{product.brand} • {product.category}</div>
             <h1 className="text-3xl font-black text-slate-900 dark:text-slate-100 leading-tight mb-4">{product.cleanTitle || product.title}</h1>
 
-            <div className="flex items-baseline gap-4">
-              <span className="text-4xl font-black text-slate-900 dark:text-slate-100">₹{cheapestPlatform?.price.toLocaleString()}</span>
-              {cheapestPlatform?.pricePrefix && <span className="text-slate-500 dark:text-slate-400 font-medium">{cheapestPlatform.pricePrefix}</span>}
-              <div className="bg-green-100 dark:bg-green-950/60 text-green-700 dark:text-green-300 px-3 py-1 rounded-full text-xs font-bold border border-green-200 dark:border-green-900/60">
-                Lowest Price
-              </div>
+            <div className="flex items-baseline gap-4 flex-wrap">
+              {bestExactPrice ? (
+                <>
+                  <span className="text-4xl font-black text-slate-900 dark:text-slate-100">₹{bestExactPrice.price.toLocaleString()}</span>
+                  <div className="bg-green-100 dark:bg-green-950/60 text-green-700 dark:text-green-300 px-3 py-1 rounded-full text-xs font-bold border border-green-200 dark:border-green-900/60">
+                    Lowest Exact Price ({bestExactPrice.source})
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-3xl font-black text-slate-900 dark:text-slate-100">
+                    {cheapestPlatform && cheapestPlatform.price > 0 ? `₹${cheapestPlatform.price.toLocaleString()}` : 'No exact match'}
+                  </span>
+                  <div className="bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 px-3 py-1 rounded-full text-xs font-bold border border-amber-200 dark:border-amber-900/60">
+                    {cheapestPlatform && cheapestPlatform.price > 0 ? 'Variant / Best Available' : 'No Stores Listed'}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -545,14 +581,16 @@ const ProductDetailPage: React.FC = () => {
 
           <ChronosForecastCard forecastData={chronosForecast} loading={chronosLoading} />
 
-          {/* Exact Matches Section */}
+          {/* Platform Offers Section */}
           <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700/70 mb-8">
             <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center justify-between">
               <span className="flex items-center">
-                Exact Matches ({eligiblePlatforms.length})
-                <ShieldCheck className="w-4 h-4 ml-2 text-green-500" />
+                Store Comparisons ({allPlatforms.length})
+                {exactPlatforms.length > 0 && <ShieldCheck className="w-4 h-4 ml-2 text-green-500" />}
               </span>
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Strictly Identical Product</span>
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                {exactPlatforms.length} Exact • {allPlatforms.length - exactPlatforms.length} Variant / Alternative
+              </span>
             </h3>
 
             {/* Comparison quality banner */}
@@ -566,53 +604,98 @@ const ProductDetailPage: React.FC = () => {
             )}
 
             <div className="space-y-4">
-              {eligiblePlatforms.map((platform, idx) => (
-                <div
-                  key={idx}
-                  className={`p-4 rounded-2xl border ${
-                    platform.isSmartDeal
-                      ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 ring-1 ring-blue-500'
-                      : 'border-slate-100 dark:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start">
-                      <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center mr-4 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0">
-                        {platform.name.charAt(0)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</div>
-                        {/* Show the actual listing title if it differs */}
-                        {platform.productTitle && platform.productTitle !== (product.cleanTitle || product.title) && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 line-clamp-2 max-w-[220px]" title={platform.productTitle}>
-                            Listed as: {platform.productTitle.substring(0, 70)}{platform.productTitle.length > 70 ? '…' : ''}
+              {allPlatforms.map((platform, idx) => {
+                const status = platform.status || platform.matchStatus || 'exact_match';
+                const isNoMatch = status === 'no_match' || platform.price <= 0;
+
+                if (isNoMatch) {
+                  return (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-800/40"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start">
+                          <div className="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-lg flex items-center justify-center mr-4 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0">
+                            {platform.name.charAt(0)}
                           </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</div>
+                            <MatchStatusBadge platform={platform} referenceTitle={product.cleanTitle || product.title} />
+                          </div>
+                        </div>
+                        {platform.url && (
+                          <a
+                            href={platform.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 dark:text-blue-400 font-semibold flex items-center hover:underline pt-1.5 ml-2 flex-shrink-0"
+                            title={`Search on ${platform.name}`}
+                          >
+                            Search Store <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                          </a>
                         )}
-                        <MatchStatusBadge platform={platform} referenceTitle={product.cleanTitle || product.title} />
                       </div>
                     </div>
-                    <div className="text-right flex items-center gap-4 ml-2 flex-shrink-0">
-                      <div>
-                        <div className="font-black text-slate-900 dark:text-slate-100">₹{platform.price.toLocaleString()}</div>
-                        {platform.matchStatus === 'unit_price_only' && platform.unitPriceB && platform.unitLabel && (
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                            ₹{platform.unitPriceB.toLocaleString()} {platform.unitLabel}
+                  );
+                }
+
+                return (
+                  <div
+                    key={idx}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      platform.isSmartDeal
+                        ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 ring-1 ring-blue-500'
+                        : status === 'variant_match'
+                        ? 'border-amber-200/80 dark:border-amber-900/40 bg-amber-50/30 dark:bg-amber-950/20'
+                        : status === 'unit_price_only'
+                        ? 'border-orange-200/80 dark:border-orange-900/40 bg-orange-50/30 dark:bg-orange-950/20'
+                        : 'border-slate-100 dark:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start">
+                        <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center mr-4 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0">
+                          {platform.name.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</span>
+                            {platform.isSmartDeal && (
+                              <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                Lowest Exact Deal
+                              </span>
+                            )}
                           </div>
-                        )}
+                          {platform.productTitle && platform.productTitle !== (product.cleanTitle || product.title) && (
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 line-clamp-2 max-w-[260px]" title={platform.productTitle}>
+                              Listed as: {platform.productTitle.substring(0, 70)}{platform.productTitle.length > 70 ? '…' : ''}
+                            </div>
+                          )}
+                          <MatchStatusBadge platform={platform} referenceTitle={product.cleanTitle || product.title} />
+                        </div>
                       </div>
-                      <a
-                        href={platform.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                        title={`View on ${platform.name}`}
-                      >
-                        <ExternalLink className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                      </a>
+                      <div className="text-right flex items-center gap-4 ml-2 flex-shrink-0">
+                        <div>
+                          <div className="font-black text-slate-900 dark:text-slate-100">₹{platform.price.toLocaleString()}</div>
+                          {platform.pricePrefix && (
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{platform.pricePrefix}</span>
+                          )}
+                        </div>
+                        <a
+                          href={platform.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                          title={`View on ${platform.name}`}
+                        >
+                          <ExternalLink className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+                        </a>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

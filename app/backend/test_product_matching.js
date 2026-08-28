@@ -122,78 +122,83 @@ const r3c = match(dove650_amz, dove650_fk);
 assert('3c. Dove Shampoo 650ml same quantity → exact_match', r3c.matchStatus, 'exact_match');
 
 // ===========================================================================
+// ===========================================================================
 // SECTION 4 — False positive prevention (must NOT be exact_match)
 // ===========================================================================
 section('4. False-positive prevention — must NOT be exact_match');
 
-// 4a. Same phone, different storage
+// 4a. Same phone, different storage → variant_match
 const s24_128 = mkItem('Amazon',   'Samsung Galaxy S24 128GB 8GB RAM 5G', 69999);
 const s24_256 = mkItem('Flipkart', 'Samsung Galaxy S24 256GB 8GB RAM 5G', 79999);
 const r4a = match(s24_128, s24_256);
-assert('4a. Galaxy S24 128 vs 256 GB → no_match', r4a.matchStatus, 'no_match');
-assert('4a. Rejection mentions storage', r4a.rejectedAttributes.some(r => r.toLowerCase().includes('storage')), true);
+assert('4a. Galaxy S24 128 vs 256 GB → variant_match', r4a.matchStatus, 'variant_match');
+assert('4a. comparisonEligible is false', r4a.comparisonEligible, false);
+assert('4a. Differences mention storage', r4a.differences.some(r => r.toLowerCase().includes('storage')), true);
 
 // 4b. Same phone family, different edition (S24 vs S24 Ultra)
 const s24_base  = mkItem('Amazon',   'Samsung Galaxy S24 256GB 5G Phantom Black', 79999);
 const s24_ultra = mkItem('Flipkart', 'Samsung Galaxy S24 Ultra 256GB 5G Titanium Gray', 134999);
 const r4b = match(s24_base, s24_ultra);
+assert('4b. Galaxy S24 vs S24 Ultra → variant_match', r4b.matchStatus, 'variant_match');
 assertNot('4b. Galaxy S24 vs S24 Ultra → NOT exact_match', r4b.matchStatus, 'exact_match');
 
 // 4c. iPhone 15 vs iPhone 15 Pro
 const ip15      = mkItem('Amazon',   'Apple iPhone 15 128GB Blue', 69999);
 const ip15_pro  = mkItem('Flipkart', 'Apple iPhone 15 Pro 128GB Black Titanium', 124999);
 const r4c = match(ip15, ip15_pro);
+assert('4c. iPhone 15 vs iPhone 15 Pro → variant_match', r4c.matchStatus, 'variant_match');
 assertNot('4c. iPhone 15 vs iPhone 15 Pro → NOT exact_match', r4c.matchStatus, 'exact_match');
 
-// 4d. Sony WH-1000XM5 vs WH-1000XM4 (different generation)
+// 4d. Sony WH-1000XM5 vs WH-1000XM4 (different generation model number)
 const xm5_ref = mkItem('Amazon',   'Sony WH-1000XM5 Wireless Headphones', 28990);
 const xm4_ref = mkItem('Flipkart', 'Sony WH-1000XM4 Wireless Headphones', 19990);
 const r4d = match(xm5_ref, xm4_ref);
 assert('4d. WH-1000XM5 vs WH-1000XM4 → no_match', r4d.matchStatus, 'no_match');
 assert('4d. Rejection mentions model number', r4d.rejectedAttributes.some(r => r.toLowerCase().includes('model number')), true);
 
-// 4e. Dove Shampoo vs Dove Conditioner (different form)
+// 4e. Dove Shampoo vs Dove Conditioner (different form in same group)
 const dove_shampoo = mkItem('Amazon',   'Dove Intense Repair Shampoo 650ml', 349);
 const dove_cond    = mkItem('Flipkart', 'Dove Intense Repair Conditioner 650ml', 349);
 const r4e = match(dove_shampoo, dove_cond);
 assert('4e. Dove Shampoo vs Conditioner → no_match', r4e.matchStatus, 'no_match');
 assert('4e. Rejection mentions form mismatch', r4e.rejectedAttributes.some(r => r.toLowerCase().includes('form')), true);
 
-// 4f. Surf Excel 1 kg vs 2 kg — different quantity
+// 4f. Surf Excel 1 kg vs 2 kg — different quantity → unit_price_only
 const surf1 = mkItem('Amazon',   'Surf Excel Matic Liquid Detergent 1 KG', 225);
 const surf2 = mkItem('Flipkart', 'Surf Excel Matic Liquid Detergent 2 KG', 430);
 const r4f = match(surf1, surf2);
-assertNot('4f. Surf Excel 1 KG vs 2 KG → NOT exact_match', r4f.matchStatus, 'exact_match');
+assert('4f. Surf Excel 1 KG vs 2 KG → unit_price_only', r4f.matchStatus, 'unit_price_only');
+assert('4f. unitPriceB calculated', typeof r4f.unitPriceB === 'number', true);
 
-// 4g. Single item vs pack of 2 — different pack count
+// 4g. Single item vs pack of 2 — different pack count → unit_price_only
 const soap1  = mkItem('Amazon',   'Dove Bar Soap 100g', 45);
 const soap2  = mkItem('Flipkart', 'Dove Bar Soap Pack of 2 x 100g', 85);
 const r4g = match(soap1, soap2);
-assertNot('4g. Single item vs Pack of 2 → NOT exact_match', r4g.matchStatus, 'exact_match');
+assert('4g. Single item vs Pack of 2 → unit_price_only', r4g.matchStatus, 'unit_price_only');
 
-// 4h. Nike Air Max size 9 vs size 8
+// 4h. Nike Air Max size 9 vs size 8 → variant_match
 const nike9 = mkItem('Amazon',   'Nike Air Max Running Shoes Size 9', 8999);
 const nike8 = mkItem('Flipkart', 'Nike Air Max Running Shoes Size 8', 8999);
 const r4h = match(nike9, nike8);
-assertNot('4h. Nike Air Max size 9 vs size 8 → NOT exact_match', r4h.matchStatus, 'exact_match');
+assert('4h. Nike Air Max size 9 vs size 8 → variant_match', r4h.matchStatus, 'variant_match');
 
-// 4i. Different brands, similar model name
+// 4i. Different brands, similar model name → no_match
 const samsung_s24 = mkItem('Amazon',   'Samsung Galaxy S24 256GB', 79999);
 const xiaomi_s24  = mkItem('Flipkart', 'Xiaomi 14 Ultra 256GB', 99999);
 const r4i = match(samsung_s24, xiaomi_s24);
 assert('4i. Samsung vs Xiaomi → no_match (brand mismatch)', r4i.matchStatus, 'no_match');
 assert('4i. Rejection mentions brand', r4i.rejectedAttributes.some(r => r.toLowerCase().includes('brand')), true);
 
-// 4j. Different RAM (8GB vs 12GB same phone)
+// 4j. Different RAM (8GB vs 12GB same phone) → variant_match
 const s24_8gb  = mkItem('Amazon',   'Samsung Galaxy S24 256GB 8GB RAM 5G', 79999);
 const s24_12gb = mkItem('Flipkart', 'Samsung Galaxy S24 256GB 12GB RAM 5G', 84999);
 const r4j = match(s24_8gb, s24_12gb);
-assert('4j. Galaxy S24 8GB vs 12GB RAM → no_match', r4j.matchStatus, 'no_match');
+assert('4j. Galaxy S24 8GB vs 12GB RAM → variant_match', r4j.matchStatus, 'variant_match');
 
 // ===========================================================================
-// SECTION 5 — Variant match cases (color differs only → variant_match)
+// SECTION 5 — Variant match cases
 // ===========================================================================
-section('5. Variant matches — expected: variant_match or exact_match');
+section('5. Variant matches — expected: variant_match');
 
 // 5a. Same phone, same storage/RAM, different color
 const s24_black  = mkItem('Amazon',   'Samsung Galaxy S24 256GB 8GB RAM 5G Phantom Black', 79999);
@@ -201,6 +206,7 @@ const s24_violet = mkItem('Flipkart', 'Samsung Galaxy S24 256GB 8GB RAM 5G Cobal
 const r5a = match(s24_black, s24_violet);
 assert('5a. Galaxy S24 same specs, color differs → variant_match', r5a.matchStatus, 'variant_match');
 assert('5a. color in differingAttributes', r5a.differingAttributes.includes('color'), true);
+assert('5a. comparisonEligible is false', r5a.comparisonEligible, false);
 
 // ===========================================================================
 // SECTION 6 — Unit-price-only cases
@@ -215,6 +221,15 @@ assert('6a. Surf Excel 1L vs 2L → unit_price_only', r6a.matchStatus, 'unit_pri
 assert('6a. unitLabel is ₹/litre', r6a.unitLabel, '₹/litre');
 assert('6a. unitPriceA is set', typeof r6a.unitPriceA === 'number', true);
 assert('6a. unitPriceB is set', typeof r6a.unitPriceB === 'number', true);
+assert('6a. pricePerUnit is set', r6a.pricePerUnit && r6a.pricePerUnit.unit === 'litre', true);
+assert('6a. comparisonEligible is false', r6a.comparisonEligible, false);
+
+// 6b. Dove Shampoo 650ml vs 340ml
+const dove_650 = mkItem('Amazon', 'Dove Intense Repair Shampoo 650ml', 349);
+const dove_340 = mkItem('Flipkart', 'Dove Intense Repair Shampoo 340ml', 199);
+const r6b = match(dove_650, dove_340);
+assert('6b. Dove 650ml vs 340ml → unit_price_only', r6b.matchStatus, 'unit_price_only');
+assert('6b. pricePerUnit unit is litre', r6b.pricePerUnit?.unit, 'litre');
 
 // ===========================================================================
 // SECTION 7 — Hard rejections produce no_match with reasons
@@ -227,14 +242,7 @@ const xm4_check = mkItem('Flipkart', 'Sony WH-1000XM4 Headphones', 19990);
 const r7a = match(xm5_check, xm4_check);
 assert('7a. Model number rejection produces reason', r7a.reasons.some(r => r.toLowerCase().includes('model')), true);
 
-// 7b. Storage hard reject
-const ip_128 = mkItem('Amazon',   'Apple iPhone 15 128GB', 69999);
-const ip_256 = mkItem('Flipkart', 'Apple iPhone 15 256GB', 79999);
-const r7b = match(ip_128, ip_256);
-assert('7b. Storage rejection produces reason', r7b.reasons.some(r => r.toLowerCase().includes('storage')), true);
-assert('7b. Values in reason', r7b.reasons.some(r => r.includes('128') || r.includes('256')), true);
-
-// 7c. Form mismatch rejection
+// 7b. Form mismatch rejection
 const shamp = mkItem('Amazon',   'Dove Shampoo 200ml', 120);
 const cond  = mkItem('Flipkart', 'Dove Conditioner 200ml', 130);
 const r7c = match(shamp, cond);
@@ -290,6 +298,41 @@ assert('9f. S24 Ultra comparisonEligible is false', s24_ultra_sim?.comparisonEli
 
 const unrelated_sim = similarResults.find(s => s.title.includes('Cotton Shirt'));
 assert('9g. Unrelated item excluded from similar', unrelated_sim === undefined, true);
+
+// ===========================================================================
+// SECTION 10 — selectBestPlatformResult priority tests
+// ===========================================================================
+section('10. selectBestPlatformResult — candidate priority');
+
+const refPhone = mkItem('Amazon', 'Samsung Galaxy S24 256GB 8GB RAM 5G', 79999);
+const fkExact = mkItem('Flipkart', 'Samsung Galaxy S24 (8GB RAM, 256GB, 5G)', 77999);
+const fkVariant = mkItem('Flipkart', 'Samsung Galaxy S24 (8GB RAM, 128GB, 5G)', 69999);
+
+// 10a. Platform has both exact and variant → selects exact
+const sel1 = matcher.selectBestPlatformResult(refPhone, [fkVariant, fkExact], 'Flipkart');
+assert('10a. Prioritizes exact_match over variant', sel1.status, 'exact_match');
+assert('10a. Exact price picked', sel1.product?.price, 77999);
+assert('10a. comparisonEligible is true', sel1.comparisonEligible, true);
+
+// 10b. Platform has only variant → selects variant_match
+const sel2 = matcher.selectBestPlatformResult(refPhone, [fkVariant], 'Flipkart');
+assert('10b. Selects variant_match when no exact match', sel2.status, 'variant_match');
+assert('10b. Differences populated', sel2.differences.some(d => d.includes('Storage differs')), true);
+assert('10b. comparisonEligible is false', sel2.comparisonEligible, false);
+
+// 10c. Platform has only quantity match → selects unit_price_only
+const refDetergent = mkItem('Amazon', 'Surf Excel Matic Liquid Detergent 2 KG', 430);
+const fkDetergent1kg = mkItem('Flipkart', 'Surf Excel Matic Liquid Detergent 1 KG', 225);
+const sel3 = matcher.selectBestPlatformResult(refDetergent, [fkDetergent1kg], 'Flipkart');
+assert('10c. Selects unit_price_only for quantity difference', sel3.status, 'unit_price_only');
+assert('10c. pricePerUnit is populated', sel3.pricePerUnit?.unit, 'kg');
+assert('10c. comparisonEligible is false', sel3.comparisonEligible, false);
+
+// 10d. Platform has no matching candidates → returns no_match
+const sel4 = matcher.selectBestPlatformResult(refPhone, [candUnrelated], 'Flipkart');
+assert('10d. Returns no_match when candidate unrelated', sel4.status, 'no_match');
+assert('10d. Product is null for no_match', sel4.product, null);
+assert('10d. Reason contains store name', sel4.reason.includes('Flipkart'), true);
 
 // ===========================================================================
 // RESULTS

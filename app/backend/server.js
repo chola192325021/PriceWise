@@ -9,6 +9,7 @@ const supabase = require("./supabase");
 const scraper = require("./services/scraper");
 const predictor = require("./services/predictor");
 const sourceSelector = require("./services/sourceSelector");
+const matcher = require("./services/matcher");
 const nodemailer = require("nodemailer");
 
 const app = express();
@@ -430,120 +431,129 @@ app.get("/products/search-live", async (req, res) => {
             }
         }
 
-        const isFlexibleMatch = (title1, title2) => {
-            if (!title1 || !title2) return false;
-            if (title1.toLowerCase().trim() === title2.toLowerCase().trim()) return true;
-
-            const extractModelCodes = (t) => {
-                const matches = t.match(/\b([A-Z0-9]{2,}-[A-Z0-9]+|[A-Z]+\d+|\d+[A-Z]+)\b/gi) || [];
-                return matches.map(m => m.toLowerCase().replace(/[^a-z0-9]/g, ''));
-            };
-
-            const models1 = extractModelCodes(title1);
-            const models2 = extractModelCodes(title2);
-
-            if (models1.length > 0 && models2.length > 0) {
-                const commonModel = models1.some(m => models2.includes(m));
-                if (!commonModel) return false;
-            }
-
-            const clean = (str) => str.toLowerCase()
-                .replace(/[^\w\s]/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim()
-                .split(' ')
-                .filter(w => w.length > 1);
-
-            const w1 = clean(title1);
-            const w2 = clean(title2);
-            if (w1.length === 0 || w2.length === 0) return false;
-
-            const genericSpecs = new Set(['128', '256', '512', '64', '32', '16gb', '8gb', '4gb', '12gb', '4g', '5g', 'gb', 'tb', 'ram', 'rom', '128gb', '256gb', '512gb']);
-            const extractNumTokens = (tokens) => tokens.filter(w => /\d/.test(w) && !genericSpecs.has(w));
-
-            const n1 = extractNumTokens(w1);
-            const n2 = extractNumTokens(w2);
-
-            if (n1.length > 0 && n2.length > 0) {
-                const hasNumMatch = n1.some(m => n2.includes(m));
-                if (!hasNumMatch) return false;
-            }
-
-            const intersection = w1.filter(w => w2.includes(w));
-            const minLen = Math.min(w1.length, w2.length);
-            const overlapRatio = intersection.length / minLen;
-
-            return overlapRatio >= 0.65 && intersection.length >= 2;
-        };
+        // -----------------------------------------------------------------------
+        // Structured product matching using matcher.js
+        // -----------------------------------------------------------------------
+        // Normalise every scraped item into the PriceWise product schema
+        const normalisedItems = allScrapedItems
+            .filter(it => it.url && it.title && it.price > 0)
+            .map(it => ({
+                ...matcher.normalizeProduct(it),
+                _raw: it
+            }));
 
         const results = [];
         const processedUrls = new Set();
+        const eligibleStores = sourceSelector.getEligibleSources({ query: cleanQuery, category: category || 'Auto' });
 
-        for (const item of allScrapedItems) {
-            if (!item.url || processedUrls.has(item.url)) continue;
-            processedUrls.add(item.url);
+        for (const normRef of normalisedItems) {
+            if (!normRef.url || processedUrls.has(normRef.url)) continue;
+            processedUrls.add(normRef.url);
 
-            const platforms = [{
-                name: item.platform,
-                price: item.price,
-                url: item.url,
+            const raw = normRef._raw;
+
+            // Start building the platforms array with the reference item
+            const referencePlatform = {
+                name: raw.platform,
+                price: raw.price,
+                url: normRef.url,
                 isSmartDeal: false,
-                pricePrefix: item.platform === 'Flipkart' ? "Starting from " : ""
-            }];
+                pricePrefix: raw.platform === 'Flipkart' ? 'Starting from ' : '',
+                productTitle: raw.title,
+                matchStatus: 'reference',
+                matchConfidence: 1.0,
+                matchedAttributes: [],
+                differingAttributes: [],
+                matchReasons: ['Reference listing']
+            };
 
-            const baseTitle = item.title;
+            const platforms = [referencePlatform];
 
-            for (const other of allScrapedItems) {
-                if (other.platform !== item.platform && !processedUrls.has(other.url) && isFlexibleMatch(baseTitle, other.title)) {
-                    processedUrls.add(other.url);
-                    if (!platforms.some(p => p.name === other.platform)) {
-                        platforms.push({
-                            name: other.platform,
-                            price: other.price,
-                            url: other.url,
-                            isSmartDeal: false,
-                            pricePrefix: other.platform === 'Flipkart' ? "Starting from " : ""
-                        });
-                    }
-                }
-            }
+            // Match every candidate from other stores against this reference
+            for (const normCand of normalisedItems) {
+                if (normCand._raw.platform === raw.platform) continue;
+                if (processedUrls.has(normCand.url)) continue;
 
-            platforms.sort((a, b) => a.price - b.price);
-            const minPrice = Math.min(...platforms.map(p => p.price));
+                const matchResult = matcher.matchProducts(normRef, normCand);
 
-            // Multi-store price aggregation across all eligible platforms
-            const brandCategory = category || 'Auto';
-            const eligibleStores = sourceSelector.getEligibleSources({ query: cleanQuery, category: brandCategory });
-            const existingStores = new Set(platforms.map(p => p.name));
+                // Log diagnostics safely (no credentials)
+                matcher.logDiagnostics(normCand, matchResult);
 
-            for (const storeName of eligibleStores) {
-                if (!existingStores.has(storeName)) {
-                    let storePrice = Math.floor(minPrice * (1 + (Math.random() * 0.08 - 0.04)));
-                    if (storePrice <= 0) storePrice = minPrice;
-                    
-                    const storeUrl = createDirectProductUrl(storeName, item.title);
+                const isAcceptable = matchResult.matchStatus === 'exact_match'
+                    || matchResult.matchStatus === 'variant_match'
+                    || matchResult.matchStatus === 'unit_price_only';
 
+                if (isAcceptable && !platforms.some(p => p.name === normCand._raw.platform)) {
+                    processedUrls.add(normCand.url);
                     platforms.push({
-                        name: storeName,
-                        price: storePrice,
-                        url: storeUrl,
+                        name: normCand._raw.platform,
+                        price: normCand._raw.price,
+                        url: normCand.url,
                         isSmartDeal: false,
-                        pricePrefix: storeName === 'Flipkart' ? "Starting from " : ""
+                        pricePrefix: normCand._raw.platform === 'Flipkart' ? 'Starting from ' : '',
+                        productTitle: normCand._raw.title,
+                        matchStatus: matchResult.matchStatus,
+                        matchConfidence: matchResult.confidence,
+                        matchedAttributes: matchResult.matchedAttributes,
+                        differingAttributes: matchResult.differingAttributes,
+                        matchReasons: matchResult.reasons,
+                        unitPriceA: matchResult.unitPriceA || null,
+                        unitPriceB: matchResult.unitPriceB || null,
+                        unitLabel: matchResult.unitLabel || null
                     });
-                    existingStores.add(storeName);
+                } else if (!isAcceptable) {
+                    console.log(`[Matcher] Excluded ${normCand._raw.platform} listing:`, matchResult.rejectedAttributes[0] || matchResult.reasons[matchResult.reasons.length - 1]);
                 }
             }
 
-            platforms.sort((a, b) => a.price - b.price);
-            if (platforms.length > 0) {
-                platforms.forEach(p => p.isSmartDeal = false);
-                platforms[0].isSmartDeal = true;
+            // Only include stores with REAL scraped prices — never fabricate
+            const realPlatforms = platforms.filter(p => eligibleStores.includes(p.name) && p.price > 0);
+            if (realPlatforms.length === 0) continue;
+
+            realPlatforms.sort((a, b) => a.price - b.price);
+            realPlatforms.forEach(p => { p.isSmartDeal = false; });
+            realPlatforms[0].isSmartDeal = true;
+
+            const minPrice = realPlatforms[0].price;
+            const baseTitle = raw.title;
+
+            // Determine the overall comparison summary for this product group
+            const nonRefPlatforms = realPlatforms.filter(p => p.matchStatus !== 'reference');
+            let overallMatchStatus = 'no_match';
+            let comparisonWarning = null;
+            let unitPriceLabel = null;
+
+            if (nonRefPlatforms.length === 0) {
+                overallMatchStatus = 'no_match';
+                comparisonWarning = `No matching listing found on other stores for: ${baseTitle.substring(0, 60)}`;
+            } else {
+                // Use the best match status across all candidate platforms
+                if (nonRefPlatforms.some(p => p.matchStatus === 'exact_match')) {
+                    overallMatchStatus = 'exact_match';
+                } else if (nonRefPlatforms.some(p => p.matchStatus === 'variant_match')) {
+                    overallMatchStatus = 'variant_match';
+                    const diffP = nonRefPlatforms.find(p => p.matchStatus === 'variant_match');
+                    if (diffP && diffP.differingAttributes.length > 0) {
+                        comparisonWarning = `Similar variant — ${diffP.differingAttributes.join(', ')} differs`;
+                    }
+                } else if (nonRefPlatforms.some(p => p.matchStatus === 'unit_price_only')) {
+                    overallMatchStatus = 'unit_price_only';
+                    const uP = nonRefPlatforms.find(p => p.matchStatus === 'unit_price_only');
+                    unitPriceLabel = uP ? uP.unitLabel : null;
+                    comparisonWarning = 'Comparable product, different pack/quantity — price per unit shown';
+                }
             }
+
+            const comparisonSummary = {
+                comparisonType: overallMatchStatus,
+                comparisonWarning,
+                unitPriceLabel
+            };
+
+            const classification = sourceSelector.classifyQuery(baseTitle, category);
 
             const { data: existingProducts } = await supabase.from('products').select('*').eq('title', baseTitle).limit(1);
             let productDoc = existingProducts && existingProducts[0];
-            
-            const classification = sourceSelector.classifyQuery(baseTitle, category);
 
             if (!productDoc && baseTitle) {
                 const history = [];
@@ -554,35 +564,29 @@ app.get("/products/search-live", async (req, res) => {
                     history.push({ price: Math.floor(randomVariation), date: date.toISOString() });
                 }
                 history.push({ price: minPrice, date: new Date().toISOString() });
-                
+
                 const { data: newProd } = await supabase.from('products').insert([{
                     title: baseTitle,
                     category: classification,
-                    image_url: item.imageUrl || "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f",
+                    image_url: raw.imageUrl || 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f',
                     price_history: history
                 }]).select();
 
                 if (newProd) productDoc = newProd[0];
             }
 
-            const finalPlatforms = platforms.filter(p => eligibleStores.includes(p.name));
-            finalPlatforms.sort((a, b) => a.price - b.price);
-            if (finalPlatforms.length > 0) {
-                finalPlatforms.forEach(p => p.isSmartDeal = false);
-                finalPlatforms[0].isSmartDeal = true;
-            }
+            const aiPrediction = await generatePredictionAsync(productDoc, minPrice, realPlatforms);
 
-            const aiPrediction = await generatePredictionAsync(productDoc, minPrice, finalPlatforms);
-
-            const stableId = productDoc ? productDoc.id : createStableProductId(item.title, item.url);
+            const stableId = productDoc ? productDoc.id : createStableProductId(baseTitle, normRef.url);
             const productObj = {
                 _id: stableId,
-                title: item.title,
-                brand: item.platform || "Verified Deal",
+                title: baseTitle,
+                brand: normRef.brand || 'Verified Deal',
                 category: classification,
-                imageUrl: item.imageUrl || "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f",
-                platforms: finalPlatforms,
-                aiPrediction: aiPrediction
+                imageUrl: raw.imageUrl || 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f',
+                platforms: realPlatforms,
+                comparisonSummary,
+                aiPrediction
             };
 
             liveProductStore.set(stableId, productObj);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
-import { Product, ProductListResponse, SingleProductResponse, ChronosForecast, PriceForecastResponse } from '../types';
+import { Product, ProductListResponse, SingleProductResponse, ChronosForecast, PriceForecastResponse, Platform, ComparisonSummary, MatchStatus } from '../types';
 
 const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; loading: boolean }> = ({ forecastData, loading }) => {
   if (loading) {
@@ -166,6 +166,116 @@ const PredictionCard: React.FC<{ prediction: Product['aiPrediction'] }> = ({ pre
       <div className="mt-4 flex items-center justify-between text-xs font-bold uppercase tracking-wider opacity-60">
         <span>History: {prediction.historyDays} Days Recorded</span>
         <span>Status: {prediction.status}</span>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Shows a color-coded inline badge for a platform's match status.
+ */
+const MatchStatusBadge: React.FC<{ platform: Platform; referenceTitle: string }> = ({ platform, referenceTitle }) => {
+  if (!platform.matchStatus || platform.matchStatus === 'reference') {
+    return <span className="text-xs text-slate-400 dark:text-slate-500 font-medium">Reference listing</span>;
+  }
+
+  const configs: Record<MatchStatus, { label: string; className: string }> = {
+    exact_match: {
+      label: '✓ Exact match',
+      className: 'bg-green-100 dark:bg-green-950/60 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
+    },
+    variant_match: {
+      label: '⚠ Similar variant',
+      className: 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+    },
+    unit_price_only: {
+      label: '↔ Different quantity',
+      className: 'bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800'
+    },
+    no_match: {
+      label: '✕ No exact match',
+      className: 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+    },
+    reference: {
+      label: 'Reference',
+      className: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+    }
+  };
+
+  const cfg = configs[platform.matchStatus];
+  if (!cfg) return null;
+
+  return (
+    <div className="mt-1.5 space-y-1">
+      <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${cfg.className}`}>
+        {cfg.label}
+      </span>
+      {platform.differingAttributes && platform.differingAttributes.length > 0 && (
+        <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
+          Differs: {platform.differingAttributes.map(a => a.replace(/([A-Z])/g, ' $1').trim()).join(', ')}
+        </div>
+      )}
+      {platform.unitLabel && platform.unitPriceB !== undefined && platform.unitPriceB !== null && (
+        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+          Unit price: ₹{platform.unitPriceB.toLocaleString()} {platform.unitLabel}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Banner shown above the platform list summarising overall comparison safety.
+ */
+const ComparisonSummaryBanner: React.FC<{ summary: ComparisonSummary | undefined }> = ({ summary }) => {
+  if (!summary || summary.comparisonType === 'exact_match') {
+    return summary ? (
+      <div className="flex items-center text-xs font-bold text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 rounded-xl px-3 py-2 mb-4">
+        <ShieldCheck className="w-4 h-4 mr-2 flex-shrink-0" />
+        Exact match confirmed across all stores
+      </div>
+    ) : null;
+  }
+
+  if (summary.comparisonType === 'variant_match') {
+    return (
+      <div className="flex items-start text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2 mb-4">
+        <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" />
+        <div>
+          <div>Similar variant — not an identical product</div>
+          {summary.comparisonWarning && (
+            <div className="font-normal opacity-90 mt-0.5">{summary.comparisonWarning}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (summary.comparisonType === 'unit_price_only') {
+    return (
+      <div className="flex items-start text-xs font-bold text-orange-700 dark:text-orange-300 bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 rounded-xl px-3 py-2 mb-4">
+        <Info className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" />
+        <div>
+          <div>Comparable product — different pack/quantity</div>
+          {summary.comparisonWarning && (
+            <div className="font-normal opacity-90 mt-0.5">{summary.comparisonWarning}</div>
+          )}
+          {summary.unitPriceLabel && (
+            <div className="font-normal opacity-80 mt-0.5">Prices shown per unit ({summary.unitPriceLabel})</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mb-4">
+      <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0 mt-0.5" />
+      <div>
+        <div>No exact match found on other stores</div>
+        {summary.comparisonWarning && (
+          <div className="font-normal opacity-80 mt-0.5">{summary.comparisonWarning}</div>
+        )}
       </div>
     </div>
   );
@@ -433,39 +543,59 @@ const ProductDetailPage: React.FC = () => {
           <ChronosForecastCard forecastData={chronosForecast} loading={chronosLoading} />
 
           <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700/70 mb-8">
-            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-6 flex items-center">
+            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center">
               Available Offers
               <ShieldCheck className="w-4 h-4 ml-2 text-green-500" />
             </h3>
+
+            {/* Comparison quality banner */}
+            <ComparisonSummaryBanner summary={product.comparisonSummary} />
+
             <div className="space-y-4">
               {product.platforms.map((platform, idx) => (
                 <div
                   key={idx}
-                  className={`flex items-center justify-between p-4 rounded-2xl border ${
+                  className={`p-4 rounded-2xl border ${
                     platform.isSmartDeal
                       ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 ring-1 ring-blue-500'
                       : 'border-slate-100 dark:border-slate-700'
                   }`}
                 >
-                  <div className="flex items-center">
-                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center mr-4 font-bold text-slate-500 dark:text-slate-400">
-                      {platform.name.charAt(0)}
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start">
+                      <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center mr-4 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0">
+                        {platform.name.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</div>
+                        {/* Show the actual listing title if it differs */}
+                        {platform.productTitle && platform.productTitle !== product.title && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 line-clamp-2 max-w-[220px]" title={platform.productTitle}>
+                            Listed as: {platform.productTitle.substring(0, 70)}{platform.productTitle.length > 70 ? '…' : ''}
+                          </div>
+                        )}
+                        <MatchStatusBadge platform={platform} referenceTitle={product.title} />
+                      </div>
                     </div>
-                    <div>
-                      <div className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{platform.isSmartDeal ? 'Cheapest option' : 'Verified store'}</div>
+                    <div className="text-right flex items-center gap-4 ml-2 flex-shrink-0">
+                      <div>
+                        <div className="font-black text-slate-900 dark:text-slate-100">₹{platform.price.toLocaleString()}</div>
+                        {platform.matchStatus === 'unit_price_only' && platform.unitPriceB && platform.unitLabel && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            ₹{platform.unitPriceB.toLocaleString()} {platform.unitLabel}
+                          </div>
+                        )}
+                      </div>
+                      <a
+                        href={platform.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                        title={`View on ${platform.name}`}
+                      >
+                        <ExternalLink className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+                      </a>
                     </div>
-                  </div>
-                  <div className="text-right flex items-center gap-4">
-                    <div className="font-black text-slate-900 dark:text-slate-100">₹{platform.price.toLocaleString()}</div>
-                    <a
-                      href={platform.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                    >
-                      <ExternalLink className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                    </a>
                   </div>
                 </div>
               ))}

@@ -206,9 +206,15 @@ fun ProductDetailScreen(
             // Comparison Section
             Text("Compare Prices", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
             Spacer(modifier = Modifier.height(12.dp))
-            
+
+            // Comparison quality banner
+            product.comparisonSummary?.let { summary ->
+                ComparisonSummaryBanner(summary = summary)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             product.platforms.forEach { platform ->
-                PlatformRow(platform)
+                PlatformRow(platform = platform, productTitle = product.title)
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
@@ -218,7 +224,113 @@ fun ProductDetailScreen(
 }
 
 @Composable
-fun PlatformRow(platform: com.pricewise.ai.model.Platform) {
+fun ComparisonSummaryBanner(summary: com.pricewise.ai.model.ComparisonSummary) {
+    val (containerColor, textColor, icon, mainText) = when (summary.comparisonType) {
+        "exact_match" -> listOf(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+            Icons.Default.CheckCircle,
+            "Exact match confirmed across all stores"
+        )
+        "variant_match" -> listOf(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            Icons.Default.Warning,
+            "Similar variant — not an identical product"
+        )
+        "unit_price_only" -> listOf(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.Info,
+            "Comparable product — different pack/quantity"
+        )
+        else -> listOf(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            Icons.Default.Error,
+            "No exact match found on other stores"
+        )
+    }
+
+    Surface(
+        color = containerColor as Color,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = icon as androidx.compose.ui.graphics.vector.ImageVector,
+                contentDescription = null,
+                tint = textColor as Color,
+                modifier = Modifier.size(16.dp).padding(top = 1.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(
+                    mainText as String,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = textColor
+                )
+                summary.comparisonWarning?.let { warning ->
+                    Text(
+                        warning,
+                        fontSize = 11.sp,
+                        color = textColor,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                summary.unitPriceLabel?.let { label ->
+                    Text(
+                        "Prices shown per unit ($label)",
+                        fontSize = 11.sp,
+                        color = textColor,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MatchStatusChip(matchStatus: String?) {
+    if (matchStatus == null || matchStatus == "reference") {
+        Text("Reference listing", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    val (chipColor, chipText) = when (matchStatus) {
+        "exact_match" -> Pair(MaterialTheme.colorScheme.tertiaryContainer, "✓ Exact match")
+        "variant_match" -> Pair(MaterialTheme.colorScheme.secondaryContainer, "⚠ Similar variant")
+        "unit_price_only" -> Pair(MaterialTheme.colorScheme.surfaceVariant, "↔ Different quantity")
+        "no_match" -> Pair(MaterialTheme.colorScheme.errorContainer, "✕ No exact match")
+        else -> Pair(MaterialTheme.colorScheme.surfaceVariant, matchStatus)
+    }
+    val chipTextColor = when (matchStatus) {
+        "exact_match" -> MaterialTheme.colorScheme.onTertiaryContainer
+        "variant_match" -> MaterialTheme.colorScheme.onSecondaryContainer
+        "no_match" -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        color = chipColor,
+        shape = RoundedCornerShape(50),
+    ) {
+        Text(
+            chipText,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = chipTextColor,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
+    }
+}
+
+@Composable
+fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String = "") {
     val context = LocalContext.current
     Card(
         modifier = Modifier
@@ -277,12 +389,44 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform) {
                 Text(platform.name.take(1), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(platform.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                Text("Free Delivery", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                // Show the actual listing title if it differs from the product title
+                val listingTitle = platform.productTitle
+                if (!listingTitle.isNullOrBlank() && listingTitle != productTitle) {
+                    Text(
+                        "Listed as: ${listingTitle.take(60)}${if (listingTitle.length > 60) "…" else ""}",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 1.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                MatchStatusChip(matchStatus = platform.matchStatus)
+                // Show differing attributes if any
+                val diffAttrs = platform.differingAttributes
+                if (!diffAttrs.isNullOrEmpty()) {
+                    Text(
+                        "Differs: ${diffAttrs.joinToString(", ") { it.replace(Regex("([A-Z])"), " $1").trim() }}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
-            Spacer(modifier = Modifier.weight(1f))
-            Text("₹${platform.price}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text("₹${platform.price.toLong()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                // Show unit price for unit_price_only matches
+                if (platform.matchStatus == "unit_price_only" && platform.unitPriceB != null && platform.unitLabel != null) {
+                    Text(
+                        "₹${platform.unitPriceB} ${platform.unitLabel}",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Spacer(modifier = Modifier.width(8.dp))
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }

@@ -32,6 +32,9 @@ jobs:
       - name: Verify Backend Syntax
         run: node --check server.js
 
+      - name: Run Backend Product Matching Tests
+        run: npm test
+
   web-ci:
     name: Web App CI (Vite & React)
     runs-on: ubuntu-latest
@@ -54,7 +57,7 @@ jobs:
         run: npm install
 
       - name: Run Vitest Unit Tests
-        run: npx vitest run
+        run: npx vitest run --pool=threads
 
       - name: Build Web Production Bundle
         run: npm run build

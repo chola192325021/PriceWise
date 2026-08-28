@@ -115,16 +115,18 @@ jobs:
         with:
           path: 'web/dist'
 
-      - name: Bundle Reports & Artifacts
+      - name: Bundle 4 Test Reports & Summary Artifacts
         run: |
           mkdir -p artifacts
-          cp -r *.xlsx artifacts/ 2>/dev/null || true
-          cp -r *.md artifacts/ 2>/dev/null || true
+          cp -f *.xlsx artifacts/ 2>/dev/null || true
+          cp -f *.md artifacts/ 2>/dev/null || true
+          echo "Bundled artifacts:"
+          ls -la artifacts/
 
-      - name: Upload Build & Reports Artifact
+      - name: Upload 4 Test Reports Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: pricewise-build-and-reports
+          name: PriceWise-4-Test-Reports
           path: artifacts/
 
   deploy:

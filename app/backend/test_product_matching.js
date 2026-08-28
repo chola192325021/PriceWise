@@ -50,7 +50,15 @@ function section(title) {
  * Quick helper: create a minimal raw scrape item and normalise it.
  */
 function mkItem(platform, title, price = 1000, url = '') {
-    return normalizeProduct({ platform, title, price, url: url || `https://example.com/${Math.random()}`, imageUrl: '' });
+    const rndId = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const baseUrls = {
+        Amazon: `https://www.amazon.in/dp/B0${rndId}`,
+        Flipkart: `https://www.flipkart.com/item/p/itm${rndId.toLowerCase()}`,
+        Meesho: `https://www.meesho.com/item/p/${rndId.toLowerCase()}`,
+        Croma: `https://www.croma.com/item/p/${rndId.toLowerCase()}`
+    };
+    const defaultUrl = (baseUrls[platform] || `https://www.amazon.in/dp/B0${rndId}`);
+    return normalizeProduct({ platform, title, price, url: url || defaultUrl, imageUrl: '' }, platform);
 }
 
 function match(a, b) {

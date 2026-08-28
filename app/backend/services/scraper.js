@@ -3,6 +3,7 @@ const cheerio = require('cheerio');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { cleanProductTitle, buildSearchQuery } = require('./productNormalizer');
+const { normalizeProductUrl, toAbsoluteUrl } = require('./productUrlValidator');
 
 puppeteer.use(StealthPlugin());
 
@@ -65,7 +66,7 @@ const searchAmazon = async (query) => {
             for (let card of cards) {
                 const titleEl = card.querySelector('h2 span, h2 a span');
                 const priceEl = card.querySelector('.a-price-whole');
-                const linkEl = card.querySelector('h2 a, a.a-link-normal');
+                const linkEl = card.querySelector('h2 a, a.a-link-normal[href*="/dp/"], a.a-link-normal');
                 const imgEl = card.querySelector('img.s-image');
                 
                 if (titleEl && priceEl && linkEl && items.length < 20) {
@@ -73,12 +74,10 @@ const searchAmazon = async (query) => {
                     const priceText = priceEl.innerText.replace(/,/g, '').trim();
                     const price = parseFloat(priceText);
                     const rawHref = linkEl.getAttribute('href') || '';
-                    const asinMatch = rawHref.match(/(?:\/dp\/|\/gp\/product\/|\/ASIN\/)([A-Z0-9]{10})/i);
-                    const link = asinMatch ? ("https://www.amazon.in/dp/" + asinMatch[1]) : (rawHref.startsWith('http') ? rawHref : ("https://www.amazon.in" + rawHref.split('?')[0]));
                     const imageUrl = imgEl ? imgEl.getAttribute('src') : '';
                     
-                    if (!isNaN(price) && rawTitle) {
-                        items.push({ platform: 'Amazon', rawTitle, price, imageUrl, url: link });
+                    if (!isNaN(price) && rawTitle && rawHref && !rawHref.startsWith('#')) {
+                        items.push({ platform: 'Amazon', rawTitle, price, imageUrl, rawHref });
                     }
                 }
             }
@@ -87,15 +86,18 @@ const searchAmazon = async (query) => {
         
         await page.close();
 
-        // Clean extracted titles and attach cleanTitle
+        // Clean extracted titles, normalize and validate URLs
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'Amazon');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("Amazon search failed:", error.message);
@@ -181,17 +183,13 @@ const searchFlipkart = async (query) => {
                 if (priceEl && items.length < 15) {
                     const priceText = priceEl.innerText.replace(/[₹,a-zA-Z]/g, '').trim();
                     const price = parseFloat(priceText);
-                    let href = linkEl.getAttribute('href') || '';
-                    let link = href;
-                    if (href && !href.startsWith('http')) {
-                        link = "https://www.flipkart.com" + (href.startsWith('/') ? '' : '/') + href;
-                    }
+                    const rawHref = linkEl.getAttribute('href') || '';
                     
                     let rawTitle = (title || '').trim();
 
                     // Fallback to clean title from URL slug if title is still missing or corrupted
-                    if (link.includes('/p/')) {
-                        const slugMatch = link.match(/\/([a-zA-Z0-9\-]+)\/p\//);
+                    if (rawHref.includes('/p/')) {
+                        const slugMatch = rawHref.match(/\/([a-zA-Z0-9\-]+)\/p\//);
                         if (slugMatch && slugMatch[1]) {
                             const slugTitle = slugMatch[1].replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                             if (!rawTitle || rawTitle.length < 5) {
@@ -201,24 +199,27 @@ const searchFlipkart = async (query) => {
                     }
 
                     const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '') : '';
-                    if (!isNaN(price) && rawTitle.length > 3 && link.includes('/p/')) {
-                        items.push({ platform: 'Flipkart', rawTitle, price, imageUrl, url: link });
+                    if (!isNaN(price) && rawTitle.length > 3 && rawHref.includes('/p/')) {
+                        items.push({ platform: 'Flipkart', rawTitle, price, imageUrl, rawHref });
                     }
                 }
             }
-            return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
+            return items.filter((item, index, self) => index === self.findIndex((t) => t.rawHref === item.rawHref)).slice(0, 10);
         });
         
         await page.close();
 
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'Flipkart');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("Flipkart search failed:", error.message);
@@ -264,26 +265,29 @@ const searchMeesho = async (query) => {
                     const rawTitle = (titleEl.innerText || titleEl.textContent || '').trim();
                     const priceText = priceEl.innerText.replace(/[₹,]/g, '').trim();
                     const price = parseFloat(priceText);
-                    const link = "https://www.meesho.com" + linkEl.getAttribute('href');
+                    const rawHref = linkEl.getAttribute('href') || '';
                     const imageUrl = imgEl ? imgEl.getAttribute('src') : '';
-                    if (!isNaN(price) && rawTitle.length > 3) {
-                        items.push({ platform: 'Meesho', rawTitle, price, imageUrl, url: link });
+                    if (!isNaN(price) && rawTitle.length > 3 && rawHref) {
+                        items.push({ platform: 'Meesho', rawTitle, price, imageUrl, rawHref });
                     }
                 }
             }
-            return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
+            return items.filter((item, index, self) => index === self.findIndex((t) => t.rawHref === item.rawHref)).slice(0, 10);
         });
         
         await page.close();
 
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'Meesho');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("Meesho search failed:", error.message);
@@ -324,11 +328,10 @@ const searchCroma = async (query) => {
                     const rawTitle = (titleEl.innerText || titleEl.textContent || linkEl.getAttribute('title') || '').trim();
                     const priceText = priceEl.innerText.replace(/[₹,]/g, '').trim();
                     const price = parseFloat(priceText);
-                    const link = linkEl.getAttribute('href');
-                    const fullLink = link ? (link.startsWith('http') ? link : "https://www.croma.com" + link) : '';
+                    const rawHref = linkEl.getAttribute('href') || '';
                     
-                    if (!isNaN(price) && rawTitle.length > 3 && fullLink) {
-                        items.push({ platform: 'Croma', rawTitle, price, imageUrl: '', url: fullLink });
+                    if (!isNaN(price) && rawTitle.length > 3 && rawHref && !rawHref.startsWith('#')) {
+                        items.push({ platform: 'Croma', rawTitle, price, imageUrl: '', rawHref });
                     }
                 }
             }
@@ -339,12 +342,15 @@ const searchCroma = async (query) => {
 
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'Croma');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("Croma search failed:", error.message);
@@ -385,11 +391,10 @@ const searchReliance = async (query) => {
                     const rawTitle = (titleEl.innerText || titleEl.textContent || '').trim();
                     const priceText = priceEl.innerText.replace(/[₹,]/g, '').trim();
                     const price = parseFloat(priceText);
-                    const link = linkEl.getAttribute('href');
-                    const fullLink = link ? (link.startsWith('http') ? link : "https://www.reliancedigital.in" + link) : '';
+                    const rawHref = linkEl.getAttribute('href') || '';
                     
-                    if (!isNaN(price) && rawTitle.length > 3 && fullLink) {
-                        items.push({ platform: 'Reliance Digital', rawTitle, price, imageUrl: '', url: fullLink });
+                    if (!isNaN(price) && rawTitle.length > 3 && rawHref && !rawHref.startsWith('#')) {
+                        items.push({ platform: 'Reliance Digital', rawTitle, price, imageUrl: '', rawHref });
                     }
                 }
             }
@@ -400,12 +405,15 @@ const searchReliance = async (query) => {
 
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'Reliance Digital');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("Reliance search failed:", error.message);
@@ -450,28 +458,30 @@ const searchAjio = async (query) => {
                     const rawTitle = titleEl ? titleEl.innerText.trim() : (linkEl.getAttribute('title') || 'AJIO Product');
                     const priceText = priceEl.innerText.replace(/[₹,a-zA-Z]/g, '').trim();
                     const price = parseFloat(priceText);
-                    const href = linkEl.getAttribute('href') || '';
-                    const fullUrl = href.startsWith('http') ? href : ('https://www.ajio.com' + href);
+                    const rawHref = linkEl.getAttribute('href') || '';
                     const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '') : '';
 
-                    if (!isNaN(price) && price > 0 && rawTitle.length > 3) {
-                        items.push({ platform: 'AJIO', rawTitle, price, imageUrl, url: fullUrl });
+                    if (!isNaN(price) && price > 0 && rawTitle.length > 3 && rawHref) {
+                        items.push({ platform: 'AJIO', rawTitle, price, imageUrl, rawHref });
                     }
                 }
             }
-            return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
+            return items.filter((item, index, self) => index === self.findIndex((t) => t.rawHref === item.rawHref)).slice(0, 10);
         });
 
         await page.close();
 
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'AJIO');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("AJIO search failed:", error.message);
@@ -516,28 +526,30 @@ const searchMyntra = async (query) => {
                     const rawTitle = titleEl ? titleEl.innerText.trim() : 'Myntra Product';
                     const priceText = priceEl.innerText.replace(/[₹,a-zA-Z]/g, '').trim();
                     const price = parseFloat(priceText);
-                    const href = linkEl.getAttribute('href') || '';
-                    const fullUrl = href.startsWith('http') ? href : ('https://www.myntra.com/' + href.replace(/^\//, ''));
+                    const rawHref = linkEl.getAttribute('href') || '';
                     const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '') : '';
 
-                    if (!isNaN(price) && price > 0 && rawTitle.length > 3) {
-                        items.push({ platform: 'Myntra', rawTitle, price, imageUrl, url: fullUrl });
+                    if (!isNaN(price) && price > 0 && rawTitle.length > 3 && rawHref) {
+                        items.push({ platform: 'Myntra', rawTitle, price, imageUrl, rawHref });
                     }
                 }
             }
-            return items.filter((item, index, self) => index === self.findIndex((t) => t.url === item.url)).slice(0, 10);
+            return items.filter((item, index, self) => index === self.findIndex((t) => t.rawHref === item.rawHref)).slice(0, 10);
         });
 
         await page.close();
 
         return rawResults.map(item => {
             const clean = cleanProductTitle(item.rawTitle);
+            const urlValidation = normalizeProductUrl(item.rawHref, 'Myntra');
             return {
                 ...item,
                 title: clean || item.rawTitle,
-                cleanTitle: clean || item.rawTitle
+                cleanTitle: clean || item.rawTitle,
+                url: urlValidation.finalUrl || item.rawHref,
+                urlValidation
             };
-        }).filter(it => it.title.length > 3);
+        }).filter(it => it.title.length > 3 && it.urlValidation.isValid);
 
     } catch (error) {
         console.error("Myntra search failed:", error.message);

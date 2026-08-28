@@ -390,16 +390,42 @@ fun MatchStatusChip(matchStatus: String?) {
 }
 
 @Composable
+fun MatchStatusChip(platform: com.pricewise.ai.model.Platform) {
+    val status = platform.status ?: platform.matchStatus
+    Column {
+        MatchStatusChip(matchStatus = status)
+        if (!platform.differences.isNullOrEmpty()) {
+            Text(
+                platform.differences.joinToString(" • "),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        if ((status == "no_match" || platform.price <= 0.0) && !platform.reason.isNullOrBlank()) {
+            Text(
+                platform.reason,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String = "") {
     val context = LocalContext.current
     val status = platform.status ?: platform.matchStatus ?: "exact_match"
-    val isNoMatch = status == "no_match" || platform.price <= 0.0
+    val isUrlValid = platform.url.isNotBlank() && (platform.urlValidation?.isValid != false)
+    val isNoMatch = status == "no_match" || platform.price <= 0.0 || !isUrlValid
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                if (platform.url.isNotBlank()) {
+            .clickable(enabled = isUrlValid) {
+                if (isUrlValid) {
                     try {
                         val rawUrl = platform.url
                         val validUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
@@ -434,6 +460,8 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
                     } catch (e: Exception) {
                         android.widget.Toast.makeText(context, "Cannot open link: ${platform.name}", android.widget.Toast.LENGTH_SHORT).show()
                     }
+                } else {
+                    android.widget.Toast.makeText(context, "This listing is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
         shape = RoundedCornerShape(12.dp),
@@ -460,43 +488,39 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             color = MaterialTheme.colorScheme.primary,
-                            shape = RoundedCornerShape(4.dp)
+                            shape = RoundedCornerShape(50)
                         ) {
-                            Text("Lowest Deal", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                            Text(
+                                "Lowest Exact Deal",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
                         }
                     }
                 }
-                // Show the actual listing title if it differs from the product title
-                val listingTitle = platform.cleanTitle ?: platform.productTitle
-                if (!listingTitle.isNullOrBlank() && listingTitle != productTitle && !isNoMatch) {
+                
+                // If platform title differs from the clean product title, show actual listing title
+                val cleanTitle = platform.cleanTitle ?: platform.productTitle
+                if (!cleanTitle.isNullOrBlank() && cleanTitle != productTitle && productTitle.isNotBlank()) {
                     Text(
-                        "Listed as: ${listingTitle.take(60)}${if (listingTitle.length > 60) "…" else ""}",
-                        fontSize = 10.sp,
+                        "Listed as: $cleanTitle",
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
                         modifier = Modifier.padding(top = 1.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                MatchStatusChip(matchStatus = status)
 
-                // Show differences if any
-                val differences = platform.differences
-                if (!differences.isNullOrEmpty()) {
-                    Text(
-                        differences.joinToString(" • "),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
+                // Show status chip badge & differences
+                MatchStatusChip(platform = platform)
 
-                // Show reason if no match
-                if (isNoMatch && !platform.reason.isNullOrBlank()) {
+                if (!isUrlValid) {
                     Text(
-                        platform.reason,
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "Listing unavailable on store",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
@@ -504,8 +528,10 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
             Spacer(modifier = Modifier.width(8.dp))
             if (!isNoMatch) {
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("₹${platform.price.toLong()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    // Show unit price for unit_price_only matches
+                    Text("₹${platform.price.toInt()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    if (!platform.pricePrefix.isNullOrBlank()) {
+                        Text(platform.pricePrefix, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     val unitPrice = platform.pricePerUnit?.value ?: platform.unitPriceB
                     val unitLabel = platform.pricePerUnit?.unit ?: platform.unitLabel?.replace("₹/", "")
                     if (unitPrice != null && unitLabel != null) {
@@ -521,7 +547,11 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
                 Text("—", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (isUrlValid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            )
         }
     }
 }
@@ -529,18 +559,24 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
 @Composable
 fun SimilarProductRow(sim: com.pricewise.ai.model.SimilarProduct) {
     val context = LocalContext.current
+    val isSimUrlValid = sim.url.isNotBlank() && (sim.urlValidation?.isValid != false)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                try {
-                    val rawUrl = sim.url
-                    val validUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
-                    val uri = Uri.parse(validUrl)
-                    val browserIntent = Intent(Intent.ACTION_VIEW, uri)
-                    context.startActivity(browserIntent)
-                } catch (e: Exception) {
-                    android.widget.Toast.makeText(context, "Cannot open link: ${sim.source}", android.widget.Toast.LENGTH_SHORT).show()
+            .clickable(enabled = isSimUrlValid) {
+                if (isSimUrlValid) {
+                    try {
+                        val rawUrl = sim.url
+                        val validUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
+                        val uri = Uri.parse(validUrl)
+                        val browserIntent = Intent(Intent.ACTION_VIEW, uri)
+                        context.startActivity(browserIntent)
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "Cannot open link: ${sim.source}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    android.widget.Toast.makeText(context, "Listing unavailable.", android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
         shape = RoundedCornerShape(12.dp),
@@ -586,10 +622,9 @@ fun SimilarProductRow(sim: com.pricewise.ai.model.SimilarProduct) {
                     maxLines = 2,
                     modifier = Modifier.padding(top = 2.dp)
                 )
-                val diffs = sim.differences
-                if (!diffs.isNullOrEmpty()) {
+                if (!sim.differences.isNullOrEmpty()) {
                     Text(
-                        diffs.first(),
+                        sim.differences.joinToString(" • "),
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 2.dp)
@@ -597,11 +632,13 @@ fun SimilarProductRow(sim: com.pricewise.ai.model.SimilarProduct) {
                 }
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Column(horizontalAlignment = Alignment.End) {
-                Text("₹${sim.price.toLong()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            }
+            Text("₹${sim.price.toInt()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(modifier = Modifier.width(8.dp))
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (isSimUrlValid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            )
         }
     }
 }

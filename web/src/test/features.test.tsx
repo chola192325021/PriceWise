@@ -294,4 +294,80 @@ describe('PriceWise Web Feature & Theme Accessibility Tests', () => {
     expect(screen.getByText(/🔴 No exact match on Meesho/i)).toBeDefined();
     expect(screen.getByText(/No exact match on Meesho\./i)).toBeDefined();
   });
+
+  it('safely handles dead/invalid platform URLs and shows unavailable notice', async () => {
+    const mockDeadLinkProduct = {
+      _id: 'prod_dead_1',
+      title: 'Samsung Galaxy S24 Ultra',
+      cleanTitle: 'Samsung Galaxy S24 Ultra',
+      brand: 'Samsung',
+      category: 'Electronics',
+      imageUrl: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9',
+      platforms: [
+        {
+          name: 'Amazon',
+          price: 129999,
+          url: 'https://www.amazon.in/dp/B0CS5X6JCD',
+          urlValidation: { isValid: true, status: 'valid', finalUrl: 'https://www.amazon.in/dp/B0CS5X6JCD' },
+          isSmartDeal: true,
+          status: 'exact_match',
+          comparisonEligible: true,
+          differences: [],
+          reason: 'Same brand and model.'
+        },
+        {
+          name: 'Flipkart',
+          price: 131999,
+          url: 'https://www.flipkart.com/broken-link/p/itm123',
+          urlValidation: { isValid: false, status: 'dead_link', reason: 'Retailer returned Page Not Found.' },
+          isSmartDeal: false,
+          status: 'no_match',
+          comparisonEligible: false,
+          differences: [],
+          reason: 'No valid product page found on Flipkart.'
+        }
+      ],
+      similarProducts: [],
+      aiPrediction: {
+        status: 'stable',
+        trend: 'stable',
+        expectedPrice: 129999,
+        currentBestPrice: 129999,
+        bestPlatform: 'Amazon',
+        observedLowPrice: 129999,
+        historyDays: 7,
+        recommendation: 'BUY_NOW',
+        confidence: 0.9,
+        confidenceLabel: 'High',
+        message: 'Stable price',
+        reason: 'Fair market value'
+      }
+    };
+
+    const apiClient = (await import('../api/client')).default;
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (url.includes('/products/prod_dead_1')) {
+        return {
+          status: 200,
+          data: { status: 'success', data: mockDeadLinkProduct }
+        } as any;
+      }
+      return { status: 200, data: { status: 'success', data: [] } } as any;
+    });
+
+    await act(async () => {
+      renderWithMemoryRouter(
+        <Routes>
+          <Route path="/product/:id" element={<ProductDetailPage />} />
+        </Routes>,
+        ['/product/prod_dead_1']
+      );
+    });
+
+    // Valid Amazon link rendered
+    expect(screen.getByTitle(/View on Amazon/i)).toBeDefined();
+
+    // Dead link notice rendered for Flipkart
+    expect(screen.getByText(/This listing is no longer available\. Search again for a current product page\./i)).toBeDefined();
+  });
 });

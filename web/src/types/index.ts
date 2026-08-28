@@ -23,11 +23,22 @@ export interface PricePerUnit {
   unit: string;
 }
 
+export interface UrlValidation {
+  isValid: boolean;
+  status: 'valid' | 'invalid_url' | 'wrong_source' | 'dead_link' | 'all_candidates_invalid' | 'soft_404' | 'unavailable';
+  originalUrl?: string;
+  finalUrl?: string;
+  canonicalUrl?: string;
+  reason?: string | null;
+  checkedAt?: string;
+}
+
 export interface Platform {
   name: string;
   price: number;
   pricePrefix?: string;
   url: string;
+  urlValidation?: UrlValidation;
   isSmartDeal: boolean;
   /** The actual listing title on this platform (may differ from the query title) */
   productTitle?: string | null;
@@ -69,6 +80,7 @@ export interface PlatformResult {
     model?: string;
     attributes?: Record<string, any>;
   } | null;
+  urlValidation?: UrlValidation;
   differences: string[];
   pricePerUnit: PricePerUnit | null;
   reason: string;
@@ -79,6 +91,7 @@ export interface SimilarProduct {
   title: string;
   price: number;
   url: string;
+  urlValidation?: UrlValidation;
   imageUrl?: string;
   matchType: 'similar';
   similarityTier: 'close_variant' | 'comparable_alternative' | 'related_product';

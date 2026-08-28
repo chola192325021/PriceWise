@@ -16,6 +16,7 @@
 'use strict';
 
 const { cleanProductTitle, buildSearchQuery } = require('./productNormalizer');
+const { normalizeProductUrl } = require('./productUrlValidator');
 
 // ---------------------------------------------------------------------------
 // Marketing noise to strip from titles before normalisation
@@ -145,7 +146,7 @@ function cleanTitle(title) {
 
     // Normalise separators and punctuation (but NOT inside model numbers)
     t = t.replace(/[|–—•·]/g, ' ')
-         .replace(/\s*[,;:]\s*/g, ' ')
+         .replace(/\s*[,;:\-]\s*/g, ' ')
          .replace(/\s+/g, ' ')
          .trim();
 
@@ -160,13 +161,10 @@ function cleanTitle(title) {
 function extractBrand(title) {
     if (!title) return null;
     const t = title.toLowerCase();
-
-    // Sort all aliases by length descending so longer, more-specific aliases win
     const sorted = Object.keys(BRAND_CANONICAL).sort((a, b) => b.length - a.length);
     for (const alias of sorted) {
-        const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(?:^|[\\s,([])${escaped}(?:$|[\\s,)\\]])`, 'i');
-        if (regex.test(t) || t.startsWith(alias) || t.endsWith(alias) || t.includes(` ${alias} `)) {
+        const regex = new RegExp(`\\b${alias.replace(/\s+/g, '\\s+')}\\b`, 'i');
+        if (regex.test(t)) {
             return BRAND_CANONICAL[alias];
         }
     }
@@ -249,8 +247,8 @@ function extractRam(text) {
  */
 function extractCapacityMl(text) {
     if (!text) return null;
-    const litreMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(?:litre|liter|l\b)/i);
-    if (litreMatch) return parseFloat(litreMatch[1]) * 1000;
+    const lMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(?:l|ltr|litre|liter|litres|liters)\b/i);
+    if (lMatch) return Math.round(parseFloat(lMatch[1]) * 1000);
     const mlMatch = text.match(/\b(\d+(?:\.\d+)?)\s*ml\b/i);
     if (mlMatch) return parseFloat(mlMatch[1]);
     return null;
@@ -262,9 +260,25 @@ function extractCapacityMl(text) {
 function extractWeightG(text) {
     if (!text) return null;
     const kgMatch = text.match(/\b(\d+(?:\.\d+)?)\s*kg\b/i);
-    if (kgMatch) return parseFloat(kgMatch[1]) * 1000;
-    const gMatch = text.match(/\b(\d+(?:\.\d+)?)\s*g\b(?!\s*b)/i);
+    if (kgMatch) return Math.round(parseFloat(kgMatch[1]) * 1000);
+    const gMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(?:g|gm|gms|gram|grams)\b/i);
     if (gMatch) return parseFloat(gMatch[1]);
+    return null;
+}
+
+/**
+ * Extracts phone edition / tier.
+ */
+function extractPhoneEdition(text) {
+    if (!text) return null;
+    const t = text.toLowerCase();
+    if (/\bpro\s+max\b/.test(t)) return 'pro_max';
+    if (/\bplus\b/.test(t))    return 'plus';
+    if (/\bultra\b/.test(t))   return 'ultra';
+    if (/\bpro\b/.test(t))     return 'pro';
+    if (/\bmini\b/.test(t))    return 'mini';
+    if (/\bfe\b/.test(t))      return 'fe';
+    if (/\blite\b/.test(t))    return 'lite';
     return null;
 }
 
@@ -303,7 +317,8 @@ function extractColor(text) {
     const t = text.toLowerCase();
     const sorted = Object.keys(COLOUR_MAP).sort((a, b) => b.length - a.length);
     for (const phrase of sorted) {
-        if (t.includes(phrase)) return COLOUR_MAP[phrase];
+        const regex = new RegExp(`\\b${phrase.replace(/\s+/g, '\\s+')}\\b`, 'i');
+        if (regex.test(t)) return COLOUR_MAP[phrase];
     }
     return null;
 }
@@ -343,53 +358,27 @@ function extractProductForm(text) {
     const t = text.toLowerCase();
     for (const [group, forms] of Object.entries(FORM_GROUPS)) {
         for (const form of forms) {
-            if (t.includes(form)) return { group, form };
+            const regex = new RegExp(`\\b${form.replace(/\s+/g, '\\s+')}\\b`, 'i');
+            if (regex.test(t)) return { group, form };
         }
     }
     return null;
 }
 
 /**
- * Extracts phone-specific model identifiers
- */
-function extractPhoneEdition(text) {
-    if (!text) return null;
-    const t = text.toLowerCase();
-
-    const iphoneEditions = [
-        'pro max', 'pro', 'plus', 'mini',
-        'ultra', 'fe', 'edge', 'fold', 'flip',
-        'e', 'a', 'f', 's', 'x'
-    ];
-    const iphoneMatch = t.match(/iphone\s+\d+\s*([a-z\s]+)/);
-    if (iphoneMatch) {
-        for (const ed of iphoneEditions) {
-            if (iphoneMatch[1].trim().startsWith(ed)) return ed.replace(/\s+/g, '_');
-        }
-    }
-
-    const galaxyMatch = t.match(/galaxy\s+[szamf]\d+\s*([a-z+\s]*)/);
-    if (galaxyMatch && galaxyMatch[1].trim()) {
-        const ed = galaxyMatch[1].trim().replace(/[^a-z+]/g, '');
-        if (['ultra', 'plus', '+', 'fe', 'edge', 'fold', 'flip', 'lite'].includes(ed)) return ed;
-    }
-
-    return null;
-}
-
-/**
- * Extracts the core model name token(s)
+ * Extracts the product model substring from title.
  */
 function extractModel(title, brand) {
-    if (!title) return null;
+    if (!title) return '';
     let t = cleanTitle(title);
-
     if (brand) {
         t = t.replace(new RegExp(`\\b${brand}\\b`, 'gi'), '').trim();
     }
 
-    const sonyMatch = t.match(/\b(wh|wf|xm|mdr|ath)-?[\w]+\b/i);
-    if (sonyMatch) return normaliseModelString(sonyMatch[0]);
+    const modelNo = extractModelNumber(title);
+    if (modelNo) {
+        return normaliseModelString(modelNo);
+    }
 
     const iphoneMatch = t.match(/iphone\s*(\d+(?:\s+(?:pro\s+max|pro|plus|mini))?)/i);
     if (iphoneMatch) return normaliseModelString(iphoneMatch[0]);
@@ -428,9 +417,10 @@ function tokenSimilarity(a, b) {
  * Converts a raw scraped item into the structured PriceWise product schema.
  *
  * @param {Object} rawItem  Raw scrape result: { platform, title, price, url, imageUrl, rawTitle }
+ * @param {string} [defaultSource] Optional fallback source name
  * @returns {Object} Normalised product schema
  */
-function normalizeProduct(rawItem) {
+function normalizeProduct(rawItem, defaultSource = '') {
     if (!rawItem) return null;
 
     const rawTitle = rawItem.rawTitle || rawItem.title || '';
@@ -480,10 +470,16 @@ function normalizeProduct(rawItem) {
 
     const extractedConfidence = Math.min(1.0, extractedCount / 5);
 
+    const rawUrl = rawItem.url || rawItem.link || '';
+    const srcName = rawItem.platform || defaultSource || '';
+    const urlValidation = normalizeProductUrl(rawUrl, srcName);
+    const finalUrl = (urlValidation.isValid && urlValidation.canonicalUrl) ? urlValidation.canonicalUrl : (urlValidation.finalUrl || rawUrl);
+
     return {
-        source: (rawItem.platform || 'unknown').toLowerCase(),
-        sourceProductId,
-        url: rawItem.url || '',
+        source: (rawItem.platform || defaultSource || 'unknown').toLowerCase(),
+        sourceProductId: sourceProductId || urlValidation.productId,
+        url: finalUrl,
+        urlValidation,
         rawTitle,
         title: cleanTitleStr || rawTitle,
         cleanTitle: cleanTitleStr || rawTitle,
@@ -567,7 +563,14 @@ function applyHardRejections(a, b, category) {
         if (a.variant.productForm && b.variant.productForm &&
             a.variant.productFormGroup === b.variant.productFormGroup &&
             a.variant.productForm !== b.variant.productForm) {
-            return { reason: `Rejected: Product form mismatch — ${a.variant.productForm} ≠ ${b.variant.productForm}` };
+            // Allow interchangeable retailer synonyms like headphones vs headset, moisturizer vs moisturiser
+            const isSynonym = (
+                (a.variant.productFormGroup === 'headphones' && ['headphones', 'headset'].includes(a.variant.productForm) && ['headphones', 'headset'].includes(b.variant.productForm)) ||
+                (a.variant.productFormGroup === 'skin_care' && ['moisturizer', 'moisturiser'].includes(a.variant.productForm) && ['moisturizer', 'moisturiser'].includes(b.variant.productForm))
+            );
+            if (!isSynonym) {
+                return { reason: `Rejected: Product form mismatch — ${a.variant.productForm} ≠ ${b.variant.productForm}` };
+            }
         }
     }
 
@@ -654,7 +657,11 @@ function matchProducts(a, b) {
     }
 
     const sameBrand = a.brand && b.brand && a.brand === b.brand;
-    const sameForm = a.variant.productForm && b.variant.productForm && a.variant.productForm === b.variant.productForm;
+    const sameForm = a.variant.productForm && b.variant.productForm && (
+        a.variant.productForm === b.variant.productForm ||
+        (a.variant.productFormGroup === 'headphones' && ['headphones', 'headset'].includes(a.variant.productForm) && ['headphones', 'headset'].includes(b.variant.productForm)) ||
+        (a.variant.productFormGroup === 'skin_care' && ['moisturizer', 'moisturiser'].includes(a.variant.productForm) && ['moisturizer', 'moisturiser'].includes(b.variant.productForm))
+    );
 
     if (a.model && b.model) {
         const normA = normaliseModelString(a.model);
@@ -959,12 +966,42 @@ function selectBestPlatformResult(queryProduct, candidates = [], sourceName = ''
             product: null,
             differences: [],
             pricePerUnit: null,
+            urlValidation: {
+                isValid: false,
+                status: 'dead_link',
+                reason: `No relevant product found on ${defaultSource}.`
+            },
             reason: `No relevant product found on ${defaultSource}.`
         };
     }
 
-    // Match each candidate against queryProduct
-    const scoredList = storeCandidates.map(cand => {
+    // Filter to only candidates with valid, working product URLs
+    const validCandidates = storeCandidates.filter(c => {
+        if (!c || !c.url) return false;
+        if (c.urlValidation && c.urlValidation.isValid === false) return false;
+        return true;
+    });
+
+    if (validCandidates.length === 0) {
+        return {
+            source: defaultSource,
+            status: 'no_match',
+            comparisonEligible: false,
+            confidence: 0,
+            product: null,
+            differences: [],
+            pricePerUnit: null,
+            urlValidation: {
+                isValid: false,
+                status: 'all_candidates_invalid',
+                reason: `No valid product page found on ${defaultSource}.`
+            },
+            reason: `No valid product page found on ${defaultSource}.`
+        };
+    }
+
+    // Match each valid candidate against queryProduct
+    const scoredList = validCandidates.map(cand => {
         const matchResult = matchProducts(normQuery, cand);
         return {
             cand,
@@ -1004,12 +1041,24 @@ function selectBestPlatformResult(queryProduct, candidates = [], sourceName = ''
             product: null,
             differences: [],
             pricePerUnit: null,
+            urlValidation: {
+                isValid: false,
+                status: 'dead_link',
+                reason: `No exact match on ${defaultSource}.`
+            },
             reason: `No exact match on ${defaultSource}.`
         };
     }
 
     const { cand, matchResult } = selected;
     const cleanTitleDisplay = cand.cleanTitle || cand.title || (cand._raw && cand._raw.title) || '';
+
+    const urlValidation = cand.urlValidation || {
+        isValid: true,
+        status: 'valid',
+        finalUrl: cand.url || '',
+        checkedAt: new Date().toISOString()
+    };
 
     return {
         source: defaultSource,
@@ -1036,6 +1085,7 @@ function selectBestPlatformResult(queryProduct, candidates = [], sourceName = ''
                 color: cand.variant.color
             }
         },
+        urlValidation,
         differences: matchResult.differences || [],
         pricePerUnit: matchResult.pricePerUnit || null,
         reason: matchResult.reason
@@ -1056,7 +1106,8 @@ function findSimilarProducts(refProduct, candidateProducts = []) {
     const similarList = [];
 
     for (const cand of candidateProducts) {
-        if (!cand || cand.url === refProduct.url) continue;
+        if (!cand || !cand.url || cand.url === refProduct.url) continue;
+        if (cand.urlValidation && cand.urlValidation.isValid === false) continue;
 
         const matchResult = matchProducts(refProduct, cand);
 

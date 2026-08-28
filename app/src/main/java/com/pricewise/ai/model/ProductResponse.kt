@@ -50,6 +50,14 @@ data class Product(
     @SerializedName("comparisonSummary") val comparisonSummary: ComparisonSummary? = null
 )
 
+data class UrlValidation(
+    @SerializedName("isValid") val isValid: Boolean = true,
+    @SerializedName("status") val status: String = "valid",
+    @SerializedName("finalUrl") val finalUrl: String? = null,
+    @SerializedName("canonicalUrl") val canonicalUrl: String? = null,
+    @SerializedName("reason") val reason: String? = null
+)
+
 /**
  * How well a platform listing matches the reference listing.
  * Values: "exact_match", "variant_match", "unit_price_only", "no_match", "reference"
@@ -59,6 +67,7 @@ data class Platform(
     @SerializedName("price") val price: Double,
     @SerializedName("pricePrefix") val pricePrefix: String? = null,
     @SerializedName("url") val url: String,
+    @SerializedName("urlValidation") val urlValidation: UrlValidation? = null,
     @SerializedName("isSmartDeal") val isSmartDeal: Boolean,
     /** The actual listing title on this platform (may differ from the product title) */
     @SerializedName("productTitle") val productTitle: String? = null,
@@ -87,6 +96,7 @@ data class SimilarProduct(
     @SerializedName("title") val title: String,
     @SerializedName("price") val price: Double,
     @SerializedName("url") val url: String,
+    @SerializedName("urlValidation") val urlValidation: UrlValidation? = null,
     @SerializedName("imageUrl") val imageUrl: String? = null,
     @SerializedName("matchType") val matchType: String = "similar",
     @SerializedName("similarityTier") val similarityTier: String,

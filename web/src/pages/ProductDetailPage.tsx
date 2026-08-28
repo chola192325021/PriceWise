@@ -606,7 +606,8 @@ const ProductDetailPage: React.FC = () => {
             <div className="space-y-4">
               {allPlatforms.map((platform, idx) => {
                 const status = platform.status || platform.matchStatus || 'exact_match';
-                const isNoMatch = status === 'no_match' || platform.price <= 0;
+                const isUrlValid = Boolean(platform.url && (!platform.urlValidation || platform.urlValidation.isValid !== false));
+                const isNoMatch = status === 'no_match' || platform.price <= 0 || !isUrlValid;
 
                 if (isNoMatch) {
                   return (
@@ -622,9 +623,14 @@ const ProductDetailPage: React.FC = () => {
                           <div className="flex-1 min-w-0">
                             <div className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</div>
                             <MatchStatusBadge platform={platform} referenceTitle={product.cleanTitle || product.title} />
+                            {!isUrlValid && (
+                              <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                                This listing is no longer available. Search again for a current product page.
+                              </div>
+                            )}
                           </div>
                         </div>
-                        {platform.url && (
+                        {isUrlValid && platform.url ? (
                           <a
                             href={platform.url}
                             target="_blank"
@@ -634,6 +640,10 @@ const ProductDetailPage: React.FC = () => {
                           >
                             Search Store <ExternalLink className="w-3.5 h-3.5 ml-1" />
                           </a>
+                        ) : (
+                          <span className="text-xs text-slate-400 dark:text-slate-500 pt-1.5 ml-2 flex-shrink-0 font-medium">
+                            Unavailable
+                          </span>
                         )}
                       </div>
                     </div>
@@ -682,15 +692,25 @@ const ProductDetailPage: React.FC = () => {
                             <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{platform.pricePrefix}</span>
                           )}
                         </div>
-                        <a
-                          href={platform.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                          title={`View on ${platform.name}`}
-                        >
-                          <ExternalLink className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                        </a>
+                        {isUrlValid ? (
+                          <a
+                            href={platform.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                            title={`View on ${platform.name}`}
+                          >
+                            <ExternalLink className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+                          </a>
+                        ) : (
+                          <button
+                            disabled
+                            className="p-2 bg-slate-100 dark:bg-slate-700/50 rounded-xl opacity-40 cursor-not-allowed"
+                            title="Listing unavailable"
+                          >
+                            <ExternalLink className="w-5 h-5 text-slate-400" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -716,53 +736,66 @@ const ProductDetailPage: React.FC = () => {
               </p>
 
               <div className="space-y-3">
-                {product.similarProducts.map((sim, idx) => (
-                  <div
-                    key={idx}
-                    className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0 pr-4">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{sim.source}</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            sim.similarityTier === 'close_variant'
-                              ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                              : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                          }`}>
-                            {sim.similarityTier === 'close_variant' ? 'Similar Variant' : 'Comparable Alternative'}
-                          </span>
-                        </div>
-                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 line-clamp-2 mb-2">
-                          {sim.title}
-                        </div>
-                        {sim.differences && sim.differences.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {sim.differences.map((diff, dIdx) => (
-                              <span key={dIdx} className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800/50">
-                                {diff}
-                              </span>
-                            ))}
+                {product.similarProducts.map((sim, idx) => {
+                  const isSimUrlValid = Boolean(sim.url && (!sim.urlValidation || sim.urlValidation.isValid !== false));
+                  return (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0 pr-4">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{sim.source}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              sim.similarityTier === 'close_variant'
+                                ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                                : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                            }`}>
+                              {sim.similarityTier === 'close_variant' ? 'Similar Variant' : 'Comparable Alternative'}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                      <div className="text-right flex items-center gap-3 flex-shrink-0">
-                        <div className="font-black text-slate-900 dark:text-slate-100 text-base">
-                          ₹{sim.price.toLocaleString()}
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-snug line-clamp-1 mb-1">
+                            {sim.title}
+                          </h4>
+                          {sim.differences && sim.differences.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {sim.differences.map((diff, dIdx) => (
+                                <span key={dIdx} className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800/50">
+                                  {diff}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <a
-                          href={sim.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                          title={`View on ${sim.source}`}
-                        >
-                          <ExternalLink className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-                        </a>
+                        <div className="text-right flex items-center gap-3 flex-shrink-0">
+                          <div className="font-black text-slate-900 dark:text-slate-100 text-base">
+                            ₹{sim.price.toLocaleString()}
+                          </div>
+                          {isSimUrlValid ? (
+                            <a
+                              href={sim.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                              title={`View on ${sim.source}`}
+                            >
+                              <ExternalLink className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                            </a>
+                          ) : (
+                            <button
+                              disabled
+                              className="p-2 bg-slate-100 dark:bg-slate-700/50 rounded-xl opacity-40 cursor-not-allowed"
+                              title="Listing unavailable"
+                            >
+                              <ExternalLink className="w-4 h-4 text-slate-400" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

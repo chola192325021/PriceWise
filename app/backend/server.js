@@ -11,6 +11,7 @@ const predictor = require("./services/predictor");
 const sourceSelector = require("./services/sourceSelector");
 const matcher = require("./services/matcher");
 const productNormalizer = require("./services/productNormalizer");
+const productUrlValidator = require("./services/productUrlValidator");
 const nodemailer = require("nodemailer");
 
 const app = express();
@@ -513,14 +514,23 @@ function getSharedMocks() {
     ];
 
     return rawMocks.map(m => {
-        const exactPlatforms = m.platforms.filter(p => (p.status === 'exact_match' || p.matchStatus === 'exact_match') && p.price > 0);
+        const platforms = m.platforms.map(p => {
+            const urlVal = productUrlValidator.normalizeProductUrl(p.url, p.name);
+            return {
+                ...p,
+                url: urlVal.isValid ? (urlVal.canonicalUrl || urlVal.finalUrl) : p.url,
+                urlValidation: urlVal
+            };
+        });
+
+        const exactPlatforms = platforms.filter(p => (p.status === 'exact_match' || p.matchStatus === 'exact_match') && p.price > 0 && p.urlValidation.isValid);
         let bestExactPrice = null;
         if (exactPlatforms.length > 0) {
             exactPlatforms.sort((a, b) => a.price - b.price);
             bestExactPrice = { source: exactPlatforms[0].name, price: exactPlatforms[0].price };
         }
 
-        const platformResults = m.platforms.map(p => ({
+        const platformResults = platforms.map(p => ({
             source: p.name,
             status: p.status || p.matchStatus || 'exact_match',
             comparisonEligible: p.comparisonEligible !== false,
@@ -536,6 +546,7 @@ function getSharedMocks() {
                 model: "",
                 attributes: {}
             },
+            urlValidation: p.urlValidation,
             differences: p.differences || [],
             pricePerUnit: p.pricePerUnit || null,
             reason: p.reason || "Same brand, model, and required specifications."
@@ -543,6 +554,7 @@ function getSharedMocks() {
 
         return {
             ...m,
+            platforms,
             platformResults,
             bestExactPrice
         };
@@ -627,7 +639,6 @@ app.get("/products/search-live", async (req, res) => {
 
         const results = [];
         const processedUrls = new Set();
-        const eligibleStores = sourceSelector.getEligibleSources({ query: cleanQuery, category: category || 'Auto' });
 
         for (const normRef of normalisedItems) {
             if (!normRef.url || processedUrls.has(normRef.url)) continue;
@@ -636,11 +647,17 @@ app.get("/products/search-live", async (req, res) => {
             const raw = normRef._raw;
             const baseTitle = normRef.cleanTitle || raw.title;
 
-            // Build structured platform results for every eligible retailer
-            const platformResults = [];
             const platforms = [];
+            const platformResults = [];
 
-            // Reference store result (guaranteed exact match for the source item itself)
+            // Determine eligible stores for this product category
+            const eligibleStores = sourceSelector.getEligibleSources({
+                query: baseTitle,
+                category: category || normRef.category
+            });
+
+            // 1. Reference store listing
+            const refUrlValidation = normRef.urlValidation || productUrlValidator.normalizeProductUrl(raw.url, raw.platform);
             const refPlatformResult = {
                 source: raw.platform,
                 status: 'exact_match',
@@ -650,13 +667,14 @@ app.get("/products/search-live", async (req, res) => {
                     title: baseTitle,
                     price: raw.price,
                     currency: 'INR',
-                    url: normRef.url,
+                    url: raw.url,
                     imageUrl: raw.imageUrl || '',
                     available: true,
                     brand: normRef.brand || '',
                     model: normRef.model || '',
                     attributes: normRef.variant || {}
                 },
+                urlValidation: refUrlValidation,
                 differences: [],
                 pricePerUnit: null,
                 reason: 'Reference listing'
@@ -680,6 +698,7 @@ app.get("/products/search-live", async (req, res) => {
                     name: pr.source,
                     price: prod ? prod.price : 0,
                     url: prod ? prod.url : '',
+                    urlValidation: pr.urlValidation || { isValid: Boolean(prod && prod.url), status: prod && prod.url ? 'valid' : 'dead_link', finalUrl: prod ? prod.url : '' },
                     isSmartDeal: false,
                     pricePrefix: pr.source === 'Flipkart' ? 'Starting from ' : '',
                     productTitle: prod ? prod.title : null,
@@ -703,15 +722,15 @@ app.get("/products/search-live", async (req, res) => {
             // Find Similar Products for extra alternative discovery
             const similarProducts = matcher.findSimilarProducts(normRef, normalisedItems);
 
-            // Compute exact-only best price and Smart Deal
-            const exactPlatforms = platforms.filter(p => p.status === 'exact_match' && p.price > 0);
+            // Compute exact-only best price and Smart Deal (must be exact_match and have valid URL)
+            const exactPlatforms = platforms.filter(p => p.status === 'exact_match' && p.price > 0 && (!p.urlValidation || p.urlValidation.isValid !== false));
             let bestExactPrice = null;
             let minPrice = raw.price || 0;
 
             if (exactPlatforms.length > 0) {
                 exactPlatforms.sort((a, b) => a.price - b.price);
                 exactPlatforms.forEach(p => { p.isSmartDeal = false; });
-                exactPlatforms[0].isSmartDeal = true; // Cheapest EXACT match only
+                exactPlatforms[0].isSmartDeal = true; // Cheapest EXACT match with valid URL
                 bestExactPrice = { source: exactPlatforms[0].name, price: exactPlatforms[0].price };
                 minPrice = exactPlatforms[0].price;
             }

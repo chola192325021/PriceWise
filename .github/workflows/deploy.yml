@@ -7,6 +7,15 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
 jobs:
   selenium-tests:
     name: Selenium Web Tests
@@ -98,13 +107,21 @@ jobs:
             cd web && npm run build
           fi
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'web/dist'
+
       - name: Bundle Reports & Artifacts
         run: |
           mkdir -p artifacts
           cp -r *.xlsx artifacts/ 2>/dev/null || true
           cp -r *.md artifacts/ 2>/dev/null || true
 
-      - name: Upload Build Artifacts
+      - name: Upload Build & Reports Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pricewise-build-and-reports
@@ -114,10 +131,10 @@ jobs:
     name: Deploy
     needs: [build-and-bundle]
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Deploy Application
-        run: |
-          echo "Deployment successful!"
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

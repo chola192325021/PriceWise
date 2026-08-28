@@ -53,7 +53,11 @@ fun ProfileScreen(
     
     var editedName by remember(currentUser) { mutableStateOf(currentUser?.name ?: "") }
     var editedEmail by remember(currentUser) { mutableStateOf(currentUser?.email ?: "") }
-    var editedPhoto by remember(currentUser) { mutableStateOf(currentUser?.profilePhoto ?: "") }
+    var editedPhoto by remember(currentUser) { mutableStateOf(currentUser?.photoUrl ?: "") }
+
+    LaunchedEffect(Unit) {
+        viewModel.fetchUserProfile()
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -117,22 +121,45 @@ fun ProfileScreen(
                     .padding(vertical = 16.dp)
             ) {
                 Box {
-                    AsyncImage(
-                        model = editedPhoto.ifEmpty { "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=1000&auto=format&fit=crop" },
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier
-                            .size(100.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
-                            .clickable { 
-                                if (isEditing) {
-                                    launcher.launch("image/*")
-                                }
-                            },
-                        contentScale = ContentScale.Crop,
-                        placeholder = debugPlaceholder(),
-                        error = debugPlaceholder()
-                    )
+                    val photoToDisplay = editedPhoto.ifEmpty { currentUser?.photoUrl ?: "" }
+                    if (photoToDisplay.isNotEmpty()) {
+                        AsyncImage(
+                            model = photoToDisplay,
+                            contentDescription = "Profile Picture",
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                .clickable { 
+                                    if (isEditing) {
+                                        launcher.launch("image/*")
+                                    }
+                                },
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                .clickable { 
+                                    if (isEditing) {
+                                        launcher.launch("image/*")
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = (currentUser?.name ?: "User").take(1).uppercase(),
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .size(32.dp)

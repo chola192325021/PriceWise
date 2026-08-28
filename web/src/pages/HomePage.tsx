@@ -18,7 +18,10 @@ import {
 } from 'lucide-react';
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
-  const cheapestPlatform = product.platforms.find((p) => p.isSmartDeal) || product.platforms[0];
+  const displayTitle = product.cleanTitle || product.title;
+  const eligiblePlatforms = product.platforms.filter(p => p.comparisonEligible !== false);
+  const cheapestPlatform = eligiblePlatforms.find((p) => p.isSmartDeal) || eligiblePlatforms[0] || product.platforms[0];
+  const similarCount = product.similarProducts?.length || 0;
 
   return (
     <Link
@@ -28,7 +31,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
       <div className="relative h-48 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center p-4">
         <img
           src={product.imageUrl}
-          alt={product.title}
+          alt={displayTitle}
           className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
         />
         {cheapestPlatform && (
@@ -36,16 +39,21 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
             Smart Deal
           </div>
         )}
+        {similarCount > 0 && (
+          <div className="absolute top-2 right-2 bg-slate-800/80 backdrop-blur-sm text-slate-200 text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-700">
+            +{similarCount} similar
+          </div>
+        )}
       </div>
       <div className="p-4 flex-1 flex flex-col">
         <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wide font-medium">{product.brand}</div>
-        <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2 line-clamp-2 leading-tight h-10">{product.title}</h3>
+        <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2 line-clamp-2 leading-tight h-10">{displayTitle}</h3>
 
         <div className="mt-auto pt-4 flex items-baseline justify-between">
           <div>
             <span className="text-lg font-bold text-blue-600 dark:text-blue-400">₹{cheapestPlatform?.price.toLocaleString()}</span>
-            {product.platforms.length > 1 && (
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 block">Lowest among {product.platforms.length} stores</span>
+            {eligiblePlatforms.length > 1 && (
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 block">Lowest among {eligiblePlatforms.length} exact stores</span>
             )}
           </div>
 

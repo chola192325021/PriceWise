@@ -270,7 +270,7 @@ class AuthViewModel : ViewModel() {
                     val signUpResponse = response.body()!!
                     val userData = signUpResponse.user
                     _currentUser.value = if (userData != null) {
-                        User(userData.id, userData.email, userData.name, userData.profilePhoto, userData.memberSince)
+                        User(id = userData.id, email = userData.email, name = userData.name, profilePhoto = userData.profilePhoto, profilePhotoUrl = userData.profilePhotoUrl, profile_photo = userData.profile_photo, memberSince = userData.memberSince)
                     } else null
                     _signUpState.value = SignUpState.Success(signUpResponse)
                     fetchProducts("")
@@ -408,7 +408,7 @@ class AuthViewModel : ViewModel() {
                     "profilePhoto" to profilePhoto
                 )
                 val response = RetrofitInstance.api.updateProfile(request)
-                if (response.isSuccessful && response.body() != null) {
+                if (response.isSuccessful && response.body() != null && response.body()?.user != null) {
                     _currentUser.value = response.body()!!.user
                     Log.d("AuthViewModel", "Profile updated successfully: ${_currentUser.value?.name}")
                 } else {
@@ -416,6 +416,21 @@ class AuthViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Profile update exception", e)
+            }
+        }
+    }
+
+    fun fetchUserProfile(userId: String? = _currentUser.value?.id) {
+        val targetId = userId ?: return
+        viewModelScope.launch {
+            try {
+                val response = RetrofitInstance.api.getUserProfile(targetId)
+                if (response.isSuccessful && response.body()?.user != null) {
+                    _currentUser.value = response.body()!!.user
+                    Log.d("AuthViewModel", "User profile refreshed successfully: ${_currentUser.value?.name}")
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Fetch user profile error", e)
             }
         }
     }

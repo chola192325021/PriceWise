@@ -49,7 +49,9 @@ fun ProductDetailScreen(
         return
     }
 
-    val smartDeal = product.platforms.find { it.isSmartDeal } ?: product.platforms.first()
+    val displayTitle = product.cleanTitle ?: product.title
+    val eligiblePlatforms = product.platforms.filter { it.comparisonEligible != false }
+    val smartDeal = eligiblePlatforms.find { it.isSmartDeal } ?: eligiblePlatforms.firstOrNull() ?: product.platforms.first()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -135,7 +137,7 @@ fun ProductDetailScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // Title and Price
-            Text(product.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+            Text(displayTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("₹${smartDeal.price}", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -203,8 +205,15 @@ fun ProductDetailScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Comparison Section
-            Text("Compare Prices", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+            // Exact Matches Section
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Exact Matches (${eligiblePlatforms.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+                Text("Identical Product", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            }
             Spacer(modifier = Modifier.height(12.dp))
 
             // Comparison quality banner
@@ -213,9 +222,54 @@ fun ProductDetailScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            product.platforms.forEach { platform ->
-                PlatformRow(platform = platform, productTitle = product.title)
+            product.noExactMatchMessage?.let { msg ->
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(msg, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            eligiblePlatforms.forEach { platform ->
+                PlatformRow(platform = platform, productTitle = displayTitle)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Similar Products Section (if any)
+            if (!product.similarProducts.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Similar Products (${product.similarProducts.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text("Not in exact comparison", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Comparable alternatives and variants from verified stores.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                product.similarProducts.forEach { sim ->
+                    SimilarProductRow(sim = sim)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
 
             Spacer(modifier = Modifier.height(80.dp)) // Padding for bottom button
@@ -426,6 +480,86 @@ fun PlatformRow(platform: com.pricewise.ai.model.Platform, productTitle: String 
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun SimilarProductRow(sim: com.pricewise.ai.model.SimilarProduct) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                try {
+                    val rawUrl = sim.url
+                    val validUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "https://$rawUrl"
+                    val uri = Uri.parse(validUrl)
+                    val browserIntent = Intent(Intent.ACTION_VIEW, uri)
+                    context.startActivity(browserIntent)
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(context, "Cannot open link: ${sim.source}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(sim.source.take(1), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(sim.source, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    val tierLabel = if (sim.similarityTier == "close_variant") "Similar Variant" else "Comparable Alternative"
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text(
+                            tierLabel,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text(
+                    sim.title,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+                val diffs = sim.differences
+                if (!diffs.isNullOrEmpty()) {
+                    Text(
+                        diffs.first(),
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text("₹${sim.price.toLong()}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             }
             Spacer(modifier = Modifier.width(8.dp))
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

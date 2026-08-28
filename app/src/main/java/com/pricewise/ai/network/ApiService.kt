@@ -20,6 +20,9 @@ interface ApiService {
     @PUT("user/update")
     suspend fun updateProfile(@Body request: Map<String, String>): Response<LoginResponse>
 
+    @GET("user/profile")
+    suspend fun getUserProfile(@Query("userId") userId: String): Response<LoginResponse>
+
     @GET("products")
     suspend fun getProducts(@Query("search") search: String? = null): Response<ProductListResponse>
 

@@ -2,6 +2,8 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { cleanProductTitle, buildSearchQuery } = require('./productNormalizer');
+
 puppeteer.use(StealthPlugin());
 
 const HEADERS = {
@@ -35,6 +37,9 @@ const getBrowser = async () => {
 };
 
 const searchAmazon = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -50,21 +55,21 @@ const searchAmazon = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.amazon.in/s?k=${encodeURIComponent(query)}`;
+        const url = `https://www.amazon.in/s?k=${encodeURIComponent(cleanQuery)}`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const cards = document.querySelectorAll('.s-result-item[data-component-type="s-search-result"]');
             for (let card of cards) {
-                const titleEl = card.querySelector('h2 span');
+                const titleEl = card.querySelector('h2 span, h2 a span');
                 const priceEl = card.querySelector('.a-price-whole');
-                const linkEl = card.querySelector('a.a-link-normal');
+                const linkEl = card.querySelector('h2 a, a.a-link-normal');
                 const imgEl = card.querySelector('img.s-image');
                 
                 if (titleEl && priceEl && linkEl && items.length < 20) {
-                    const title = titleEl.innerText.trim();
+                    const rawTitle = (titleEl.innerText || titleEl.textContent || '').trim();
                     const priceText = priceEl.innerText.replace(/,/g, '').trim();
                     const price = parseFloat(priceText);
                     const rawHref = linkEl.getAttribute('href') || '';
@@ -72,8 +77,8 @@ const searchAmazon = async (query) => {
                     const link = asinMatch ? ("https://www.amazon.in/dp/" + asinMatch[1]) : (rawHref.startsWith('http') ? rawHref : ("https://www.amazon.in" + rawHref.split('?')[0]));
                     const imageUrl = imgEl ? imgEl.getAttribute('src') : '';
                     
-                    if (!isNaN(price) && title) {
-                        items.push({ platform: 'Amazon', title, price, imageUrl, url: link });
+                    if (!isNaN(price) && rawTitle) {
+                        items.push({ platform: 'Amazon', rawTitle, price, imageUrl, url: link });
                     }
                 }
             }
@@ -81,7 +86,17 @@ const searchAmazon = async (query) => {
         });
         
         await page.close();
-        return results;
+
+        // Clean extracted titles and attach cleanTitle
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("Amazon search failed:", error.message);
         if (page) await page.close();
@@ -90,6 +105,9 @@ const searchAmazon = async (query) => {
 };
 
 const searchFlipkart = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -105,11 +123,11 @@ const searchFlipkart = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.flipkart.com/search?q=${encodeURIComponent(query)}`;
+        const url = `https://www.flipkart.com/search?q=${encodeURIComponent(cleanQuery)}`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const cardSelectors = ['div[data-id]', 'div._1AtVbE', 'div._2kHMtA', 'div.cPH28e', 'div._75Wfgg', 'div._1sdw2'];
             let cards = [];
@@ -137,13 +155,15 @@ const searchFlipkart = async (query) => {
                 const linkEl = card.querySelector('a[href*="/p/"]');
                 if (!linkEl) continue;
 
+                // Priority 1: Title-specific element's title attribute or direct innerText
                 let title = "";
                 const titleEl = card.querySelector('div.KzDlHZ, ._4rR01T, .IRpwTa, a.w1wT2n, a.WpPhBo, a[title]');
                 if (titleEl) {
                     title = titleEl.getAttribute('title') || titleEl.innerText;
                 }
+                // Priority 2: Link's title attribute only (NEVER linkEl.innerText which contains "Add to Compare" button text)
                 if (!title || title.length < 5) {
-                    title = linkEl.getAttribute('title') || linkEl.innerText;
+                    title = linkEl.getAttribute('title') || "";
                 }
 
                 let priceEl = card.querySelector('div.Nx940b, ._30jeq3, div._30jeq3');
@@ -167,24 +187,22 @@ const searchFlipkart = async (query) => {
                         link = "https://www.flipkart.com" + (href.startsWith('/') ? '' : '/') + href;
                     }
                     
-                    // Validate title against URL slug if URL contains /p/
-                    let cleanTitle = title.trim();
+                    let rawTitle = (title || '').trim();
+
+                    // Fallback to clean title from URL slug if title is still missing or corrupted
                     if (link.includes('/p/')) {
                         const slugMatch = link.match(/\/([a-zA-Z0-9\-]+)\/p\//);
                         if (slugMatch && slugMatch[1]) {
                             const slugTitle = slugMatch[1].replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                            const slugNum = slugTitle.match(/\b\d+\b/);
-                            const titleNum = cleanTitle.match(/\b\d+\b/);
-                            // If title model number conflicts with URL slug model number, use slug title
-                            if (slugNum && titleNum && slugNum[0] !== titleNum[0]) {
-                                cleanTitle = slugTitle;
+                            if (!rawTitle || rawTitle.length < 5) {
+                                rawTitle = slugTitle;
                             }
                         }
                     }
 
                     const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '') : '';
-                    if (!isNaN(price) && cleanTitle.length > 5 && link.includes('/p/')) {
-                        items.push({ platform: 'Flipkart', title: cleanTitle, price, imageUrl, url: link });
+                    if (!isNaN(price) && rawTitle.length > 3 && link.includes('/p/')) {
+                        items.push({ platform: 'Flipkart', rawTitle, price, imageUrl, url: link });
                     }
                 }
             }
@@ -192,7 +210,16 @@ const searchFlipkart = async (query) => {
         });
         
         await page.close();
-        return results;
+
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("Flipkart search failed:", error.message);
         if (page) await page.close();
@@ -201,6 +228,9 @@ const searchFlipkart = async (query) => {
 };
 
 const searchMeesho = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -216,11 +246,11 @@ const searchMeesho = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.meesho.com/search?q=${encodeURIComponent(query)}`;
+        const url = `https://www.meesho.com/search?q=${encodeURIComponent(cleanQuery)}`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const links = document.querySelectorAll('a[href*="/p/"]');
             for (let linkEl of links) {
@@ -231,13 +261,13 @@ const searchMeesho = async (query) => {
                 const imgEl = container.querySelector('img');
                 
                 if (titleEl && priceEl && items.length < 20) {
-                    const title = titleEl.innerText;
+                    const rawTitle = (titleEl.innerText || titleEl.textContent || '').trim();
                     const priceText = priceEl.innerText.replace(/[₹,]/g, '').trim();
                     const price = parseFloat(priceText);
                     const link = "https://www.meesho.com" + linkEl.getAttribute('href');
                     const imageUrl = imgEl ? imgEl.getAttribute('src') : '';
-                    if (!isNaN(price) && title.length > 3) {
-                        items.push({ platform: 'Meesho', title, price, imageUrl, url: link });
+                    if (!isNaN(price) && rawTitle.length > 3) {
+                        items.push({ platform: 'Meesho', rawTitle, price, imageUrl, url: link });
                     }
                 }
             }
@@ -245,7 +275,16 @@ const searchMeesho = async (query) => {
         });
         
         await page.close();
-        return results;
+
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("Meesho search failed:", error.message);
         if (page) await page.close();
@@ -254,6 +293,9 @@ const searchMeesho = async (query) => {
 };
 
 const searchCroma = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -266,27 +308,27 @@ const searchCroma = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.croma.com/searchB?q=${encodeURIComponent(query)}:relevance`;
+        const url = `https://www.croma.com/searchB?q=${encodeURIComponent(cleanQuery)}:relevance`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const cards = document.querySelectorAll('.product-item, .product-card, li.product-list-item');
             for (let card of cards) {
-                const titleEl = card.querySelector('h3') || card.querySelector('a');
-                const priceEl = card.querySelector('.amount') || card.querySelector('.new-price');
+                const titleEl = card.querySelector('h3, .product-title, .cp-product-name, [class*="product-title"]');
+                const priceEl = card.querySelector('.amount, .new-price, [class*="price"]');
                 const linkEl = card.querySelector('a');
                 
-                if (titleEl && priceEl && items.length < 20) {
-                    const title = titleEl.innerText;
+                if (titleEl && priceEl && linkEl && items.length < 20) {
+                    const rawTitle = (titleEl.innerText || titleEl.textContent || linkEl.getAttribute('title') || '').trim();
                     const priceText = priceEl.innerText.replace(/[₹,]/g, '').trim();
                     const price = parseFloat(priceText);
                     const link = linkEl.getAttribute('href');
-                    const fullLink = link.startsWith('http') ? link : "https://www.croma.com" + link;
+                    const fullLink = link ? (link.startsWith('http') ? link : "https://www.croma.com" + link) : '';
                     
-                    if (!isNaN(price) && title.length > 5) {
-                        items.push({ platform: 'Croma', title, price, imageUrl: '', url: fullLink });
+                    if (!isNaN(price) && rawTitle.length > 3 && fullLink) {
+                        items.push({ platform: 'Croma', rawTitle, price, imageUrl: '', url: fullLink });
                     }
                 }
             }
@@ -294,7 +336,16 @@ const searchCroma = async (query) => {
         });
         
         await page.close();
-        return results;
+
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("Croma search failed:", error.message);
         if (page) await page.close();
@@ -303,6 +354,9 @@ const searchCroma = async (query) => {
 };
 
 const searchReliance = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -315,27 +369,27 @@ const searchReliance = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.reliancedigital.in/search?q=${encodeURIComponent(query)}:relevance`;
+        const url = `https://www.reliancedigital.in/search?q=${encodeURIComponent(cleanQuery)}:relevance`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const cards = document.querySelectorAll('.sp, .product-card');
             for (let card of cards) {
-                const titleEl = card.querySelector('.sp__name') || card.querySelector('p');
+                const titleEl = card.querySelector('.sp__name, p.sp__title');
                 const priceEl = card.querySelector('.TextWeb__Text-sc-1cyx778-0') || card.querySelector('span');
                 const linkEl = card.closest('a') || card.querySelector('a');
                 
                 if (titleEl && priceEl && linkEl && items.length < 20) {
-                    const title = titleEl.innerText;
+                    const rawTitle = (titleEl.innerText || titleEl.textContent || '').trim();
                     const priceText = priceEl.innerText.replace(/[₹,]/g, '').trim();
                     const price = parseFloat(priceText);
                     const link = linkEl.getAttribute('href');
-                    const fullLink = link.startsWith('http') ? link : "https://www.reliancedigital.in" + link;
+                    const fullLink = link ? (link.startsWith('http') ? link : "https://www.reliancedigital.in" + link) : '';
                     
-                    if (!isNaN(price) && title.length > 5) {
-                        items.push({ platform: 'Reliance Digital', title, price, imageUrl: '', url: fullLink });
+                    if (!isNaN(price) && rawTitle.length > 3 && fullLink) {
+                        items.push({ platform: 'Reliance Digital', rawTitle, price, imageUrl: '', url: fullLink });
                     }
                 }
             }
@@ -343,7 +397,16 @@ const searchReliance = async (query) => {
         });
         
         await page.close();
-        return results;
+
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("Reliance search failed:", error.message);
         if (page) await page.close();
@@ -352,6 +415,9 @@ const searchReliance = async (query) => {
 };
 
 const searchAjio = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -367,11 +433,11 @@ const searchAjio = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.ajio.com/search/?text=${encodeURIComponent(query)}`;
+        const url = `https://www.ajio.com/search/?text=${encodeURIComponent(cleanQuery)}`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const cards = document.querySelectorAll('.item, .product-card, div[class*="preview"], a[href*="/p/"]');
             for (let card of cards) {
@@ -381,15 +447,15 @@ const searchAjio = async (query) => {
                 const imgEl = card.querySelector('img');
 
                 if (linkEl && priceEl && items.length < 20) {
-                    const title = titleEl ? titleEl.innerText.trim() : (linkEl.getAttribute('title') || 'AJIO Product');
+                    const rawTitle = titleEl ? titleEl.innerText.trim() : (linkEl.getAttribute('title') || 'AJIO Product');
                     const priceText = priceEl.innerText.replace(/[₹,a-zA-Z]/g, '').trim();
                     const price = parseFloat(priceText);
                     const href = linkEl.getAttribute('href') || '';
                     const fullUrl = href.startsWith('http') ? href : ('https://www.ajio.com' + href);
                     const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '') : '';
 
-                    if (!isNaN(price) && price > 0 && title.length > 3) {
-                        items.push({ platform: 'AJIO', title, price, imageUrl, url: fullUrl });
+                    if (!isNaN(price) && price > 0 && rawTitle.length > 3) {
+                        items.push({ platform: 'AJIO', rawTitle, price, imageUrl, url: fullUrl });
                     }
                 }
             }
@@ -397,7 +463,16 @@ const searchAjio = async (query) => {
         });
 
         await page.close();
-        return results;
+
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("AJIO search failed:", error.message);
         if (page) await page.close();
@@ -406,6 +481,9 @@ const searchAjio = async (query) => {
 };
 
 const searchMyntra = async (query) => {
+    const cleanQuery = buildSearchQuery(query);
+    if (!cleanQuery) return [];
+
     let page;
     try {
         const browser = await getBrowser();
@@ -421,11 +499,11 @@ const searchMyntra = async (query) => {
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const url = `https://www.myntra.com/search?f=&q=${encodeURIComponent(query)}`;
+        const url = `https://www.myntra.com/search?f=&q=${encodeURIComponent(cleanQuery)}`;
         
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
         
-        const results = await page.evaluate(() => {
+        const rawResults = await page.evaluate(() => {
             const items = [];
             const cards = document.querySelectorAll('li.product-base, div.product-tuple, a[href*="/"]');
             for (let card of cards) {
@@ -435,15 +513,15 @@ const searchMyntra = async (query) => {
                 const imgEl = card.querySelector('img');
 
                 if (linkEl && priceEl && items.length < 20) {
-                    const title = titleEl ? titleEl.innerText.trim() : 'Myntra Product';
+                    const rawTitle = titleEl ? titleEl.innerText.trim() : 'Myntra Product';
                     const priceText = priceEl.innerText.replace(/[₹,a-zA-Z]/g, '').trim();
                     const price = parseFloat(priceText);
                     const href = linkEl.getAttribute('href') || '';
                     const fullUrl = href.startsWith('http') ? href : ('https://www.myntra.com/' + href.replace(/^\//, ''));
                     const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '') : '';
 
-                    if (!isNaN(price) && price > 0 && title.length > 3) {
-                        items.push({ platform: 'Myntra', title, price, imageUrl, url: fullUrl });
+                    if (!isNaN(price) && price > 0 && rawTitle.length > 3) {
+                        items.push({ platform: 'Myntra', rawTitle, price, imageUrl, url: fullUrl });
                     }
                 }
             }
@@ -451,7 +529,16 @@ const searchMyntra = async (query) => {
         });
 
         await page.close();
-        return results;
+
+        return rawResults.map(item => {
+            const clean = cleanProductTitle(item.rawTitle);
+            return {
+                ...item,
+                title: clean || item.rawTitle,
+                cleanTitle: clean || item.rawTitle
+            };
+        }).filter(it => it.title.length > 3);
+
     } catch (error) {
         console.error("Myntra search failed:", error.message);
         if (page) await page.close();

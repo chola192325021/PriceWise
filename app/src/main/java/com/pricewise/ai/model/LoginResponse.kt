@@ -21,14 +21,24 @@ data class User(
     @SerializedName("name")
     val name: String?,
     @SerializedName("profilePhoto")
-    val profilePhoto: String?,
+    val profilePhoto: String? = null,
+    @SerializedName("profilePhotoUrl")
+    val profilePhotoUrl: String? = null,
+    @SerializedName("profile_photo")
+    val profile_photo: String? = null,
     @SerializedName("memberSince")
     val memberSince: String?,
     @SerializedName("watchlist")
     val watchlist: List<String>? = emptyList(),
     @SerializedName("alerts")
     val alerts: List<AlertItem>? = emptyList()
-)
+) {
+    val photoUrl: String
+        get() = profilePhotoUrl?.takeIf { it.isNotBlank() }
+            ?: profilePhoto?.takeIf { it.isNotBlank() }
+            ?: profile_photo?.takeIf { it.isNotBlank() }
+            ?: ""
+}
 
 data class AlertItem(
     @SerializedName("productId")

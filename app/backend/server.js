@@ -10,6 +10,7 @@ const scraper = require("./services/scraper");
 const predictor = require("./services/predictor");
 const sourceSelector = require("./services/sourceSelector");
 const matcher = require("./services/matcher");
+const productNormalizer = require("./services/productNormalizer");
 const nodemailer = require("nodemailer");
 
 const app = express();
@@ -111,12 +112,12 @@ app.post("/products/track", async (req, res) => {
             if (page) try { await page.close(); } catch(e) {}
         }
 
-        const cleanName = (productName || 'Tracked Product').substring(0, 120);
+        const cleanName = productNormalizer.cleanProductTitle(productName || 'Tracked Product').substring(0, 120);
         console.log(`[Track] Working with name: "${cleanName}"`);
 
-        // Step 2: Cross-search ALL platforms for this product
-        const searchQuery = cleanName.replace(/[|:\-–—]+.*$/, '').trim().substring(0, 80);
-        console.log(`[Track] Cross-searching for: "${searchQuery}"`);
+        // Step 2: Cross-search ALL platforms for this product using clean query
+        const searchQuery = productNormalizer.buildSearchQuery(cleanName);
+        console.log(`[Track] Cross-searching with clean query: "${searchQuery}"`);
 
         const [amazonR, flipkartR, meeshoR] = await Promise.allSettled([
             scraper.searchAmazon(searchQuery),
@@ -133,12 +134,54 @@ app.post("/products/track", async (req, res) => {
         const sourcePlatformName = platform || (url.includes('amazon') ? 'Amazon' : url.includes('flipkart') ? 'Flipkart' : 'Web');
 
         // Add source as one entry
-        platformsMap[sourcePlatformName] = { name: sourcePlatformName, price: sourcePrice || 0, url, isSmartDeal: false, pricePrefix: "" };
+        platformsMap[sourcePlatformName] = { 
+            name: sourcePlatformName, 
+            price: sourcePrice || 0, 
+            url, 
+            isSmartDeal: false, 
+            pricePrefix: "",
+            comparisonEligible: true,
+            matchStatus: "reference",
+            productTitle: cleanName
+        };
 
         // Mix in search results
-        if (amazonItems.length > 0 && !platformsMap['Amazon']) platformsMap['Amazon'] = { name: 'Amazon', price: amazonItems[0].price, url: amazonItems[0].url, isSmartDeal: false, pricePrefix: "" };
-        if (flipkartItems.length > 0 && !platformsMap['Flipkart']) platformsMap['Flipkart'] = { name: 'Flipkart', price: flipkartItems[0].price, url: flipkartItems[0].url, isSmartDeal: false, pricePrefix: "" };
-        if (meeshoItems.length > 0 && !platformsMap['Meesho']) platformsMap['Meesho'] = { name: 'Meesho', price: meeshoItems[0].price, url: meeshoItems[0].url, isSmartDeal: false, pricePrefix: "" };
+        if (amazonItems.length > 0 && !platformsMap['Amazon']) {
+            platformsMap['Amazon'] = { 
+                name: 'Amazon', 
+                price: amazonItems[0].price, 
+                url: amazonItems[0].url, 
+                isSmartDeal: false, 
+                pricePrefix: "",
+                comparisonEligible: true,
+                matchStatus: "exact_match",
+                productTitle: amazonItems[0].title
+            };
+        }
+        if (flipkartItems.length > 0 && !platformsMap['Flipkart']) {
+            platformsMap['Flipkart'] = { 
+                name: 'Flipkart', 
+                price: flipkartItems[0].price, 
+                url: flipkartItems[0].url, 
+                isSmartDeal: false, 
+                pricePrefix: "Starting from ",
+                comparisonEligible: true,
+                matchStatus: "exact_match",
+                productTitle: flipkartItems[0].title
+            };
+        }
+        if (meeshoItems.length > 0 && !platformsMap['Meesho']) {
+            platformsMap['Meesho'] = { 
+                name: 'Meesho', 
+                price: meeshoItems[0].price, 
+                url: meeshoItems[0].url, 
+                isSmartDeal: false, 
+                pricePrefix: "",
+                comparisonEligible: true,
+                matchStatus: "exact_match",
+                productTitle: meeshoItems[0].title
+            };
+        }
 
         const platformsArray = Object.values(platformsMap).filter(p => p.price > 0);
         const minPrice = platformsArray.length > 0 ? Math.min(...platformsArray.map(p => p.price)) : (sourcePrice || 0);
@@ -151,10 +194,13 @@ app.post("/products/track", async (req, res) => {
 
         const newProduct = {
             title: cleanName,
+            cleanTitle: cleanName,
+            rawTitle: productName || cleanName,
             brand: sourcePlatformName,
             category: 'Tracked',
             image_url: imageUrl,
             platforms: platformsArray,
+            similarProducts: [],
             price_history: [{ price: minPrice, date: new Date().toISOString() }],
             ai_prediction: aiPrediction
         };
@@ -192,7 +238,7 @@ app.post("/products/watchlist/refresh", async (req, res) => {
         let updated = 0;
         for (const product of products) {
             try {
-                const searchQuery = product.title.replace(/[|:\-–—]+.*$/, '').trim().substring(0, 80);
+                const searchQuery = productNormalizer.buildSearchQuery(product.title);
                 const [amazonR, flipkartR] = await Promise.allSettled([
                     scraper.searchAmazon(searchQuery),
                     scraper.searchFlipkart(searchQuery)
@@ -207,20 +253,23 @@ app.post("/products/watchlist/refresh", async (req, res) => {
                 // Update or add Amazon price
                 if (amazonItems.length > 0) {
                     const idx = updatedPlatforms.findIndex(p => p.name === 'Amazon');
-                    if (idx >= 0) updatedPlatforms[idx] = { ...updatedPlatforms[idx], price: amazonItems[0].price };
-                    else updatedPlatforms.push({ name: 'Amazon', price: amazonItems[0].price, url: amazonItems[0].url, isSmartDeal: false, pricePrefix: "" });
+                    if (idx >= 0) updatedPlatforms[idx] = { ...updatedPlatforms[idx], price: amazonItems[0].price, productTitle: amazonItems[0].title };
+                    else updatedPlatforms.push({ name: 'Amazon', price: amazonItems[0].price, url: amazonItems[0].url, isSmartDeal: false, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: amazonItems[0].title });
                 }
                 // Update or add Flipkart price
                 if (flipkartItems.length > 0) {
                     const idx = updatedPlatforms.findIndex(p => p.name === 'Flipkart');
-                    if (idx >= 0) updatedPlatforms[idx] = { ...updatedPlatforms[idx], price: flipkartItems[0].price };
-                    else updatedPlatforms.push({ name: 'Flipkart', price: flipkartItems[0].price, url: flipkartItems[0].url, isSmartDeal: false, pricePrefix: "Starting from " });
+                    if (idx >= 0) updatedPlatforms[idx] = { ...updatedPlatforms[idx], price: flipkartItems[0].price, productTitle: flipkartItems[0].title };
+                    else updatedPlatforms.push({ name: 'Flipkart', price: flipkartItems[0].price, url: flipkartItems[0].url, isSmartDeal: false, pricePrefix: "Starting from ", comparisonEligible: true, matchStatus: "exact_match", productTitle: flipkartItems[0].title });
                 }
 
-                // Mark cheapest
-                if (updatedPlatforms.length > 1) {
-                    const minPrice = Math.min(...updatedPlatforms.filter(p => p.price > 0).map(p => p.price));
-                    updatedPlatforms.forEach(p => { p.isSmartDeal = p.price === minPrice; });
+                // Mark cheapest only among comparisonEligible platforms
+                const eligiblePlatforms = updatedPlatforms.filter(p => p.comparisonEligible !== false && p.price > 0);
+                if (eligiblePlatforms.length > 0) {
+                    const minPrice = Math.min(...eligiblePlatforms.map(p => p.price));
+                    updatedPlatforms.forEach(p => { 
+                        p.isSmartDeal = p.comparisonEligible !== false && p.price === minPrice; 
+                    });
                 }
 
                 const currentHistory = Array.isArray(product.price_history) ? product.price_history : [];
@@ -296,74 +345,169 @@ function getSharedMocks() {
         {
             _id: "mock_1",
             title: "Apple iPhone 15 (128 GB) - Blue",
+            cleanTitle: "Apple iPhone 15 (128 GB) - Blue",
+            rawTitle: "Apple iPhone 15 (128 GB) - Blue",
             brand: "Apple",
             category: "Electronics",
             imageUrl: "https://m.media-amazon.com/images/I/71d7rfSl0wL._SL1500_.jpg",
             platforms: [
-                { name: "Flipkart", price: 69999, pricePrefix: "Starting from ", url: "https://www.flipkart.com/apple-iphone-15-blue-128-gb/p/itmbf14ef54f645d", isSmartDeal: true },
-                { name: "Amazon", price: 71290, url: "https://www.amazon.in/dp/B0CHX1W1XY", isSmartDeal: false, pricePrefix: "" },
-                { name: "Croma", price: 72900, url: "https://www.croma.com/apple-iphone-15-128gb-blue-/p/300822", isSmartDeal: false, pricePrefix: "" }
+                { name: "Flipkart", price: 69999, pricePrefix: "Starting from ", url: "https://www.flipkart.com/apple-iphone-15-blue-128-gb/p/itmbf14ef54f645d", isSmartDeal: true, comparisonEligible: true, matchStatus: "exact_match", productTitle: "Apple iPhone 15 (128 GB) - Blue" },
+                { name: "Amazon", price: 71290, url: "https://www.amazon.in/dp/B0CHX1W1XY", isSmartDeal: false, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Apple iPhone 15 (128 GB) - Blue" },
+                { name: "Croma", price: 72900, url: "https://www.croma.com/apple-iphone-15-128gb-blue-/p/300822", isSmartDeal: false, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Apple iPhone 15 (128 GB) - Blue" }
             ],
+            similarProducts: [
+                {
+                    source: "Flipkart",
+                    title: "Apple iPhone 15 (256 GB) - Blue",
+                    price: 79999,
+                    url: "https://www.flipkart.com/apple-iphone-15-blue-256-gb/p/itmbf14ef54f645e",
+                    matchType: "similar",
+                    similarityTier: "close_variant",
+                    confidence: 0.88,
+                    differences: ["Storage differs: 256GB instead of 128GB"],
+                    comparisonEligible: false
+                },
+                {
+                    source: "Amazon",
+                    title: "Apple iPhone 15 Pro (128 GB) - Natural Titanium",
+                    price: 124990,
+                    url: "https://www.amazon.in/dp/B0CHX1W1XZ",
+                    matchType: "similar",
+                    similarityTier: "comparable_alternative",
+                    confidence: 0.75,
+                    differences: ["Model differs: iPhone 15 Pro instead of iPhone 15"],
+                    comparisonEligible: false
+                }
+            ],
+            noExactMatchMessage: null,
+            comparisonSummary: {
+                comparisonType: "exact_match",
+                comparisonWarning: null
+            },
             aiPrediction: { trend: "drop", expectedPrice: 67500, recommendation: "Historic Low expected soon! Wait 3-5 days.", confidence: 92 }
         },
         {
             _id: "mock_2",
             title: "Sony WH-1000XM5 Wireless Headphones",
+            cleanTitle: "Sony WH-1000XM5 Wireless Headphones",
+            rawTitle: "Sony WH-1000XM5 Wireless Headphones",
             brand: "Sony",
             category: "Electronics",
             imageUrl: "https://m.media-amazon.com/images/I/61+btxzpfDL._SL1500_.jpg",
             platforms: [
-                { name: "Flipkart", price: 26990, pricePrefix: "Starting from ", url: "https://www.flipkart.com/sony-wh-1000xm5-bluetooth-headset/p/itm53cf7e4aa040d", isSmartDeal: true },
-                { name: "Amazon", price: 28990, url: "https://www.amazon.in/dp/B09XS7JWHH", isSmartDeal: false, pricePrefix: "" }
+                { name: "Flipkart", price: 26990, pricePrefix: "Starting from ", url: "https://www.flipkart.com/sony-wh-1000xm5-bluetooth-headset/p/itm53cf7e4aa040d", isSmartDeal: true, comparisonEligible: true, matchStatus: "exact_match", productTitle: "Sony WH-1000XM5 Wireless Headphones" },
+                { name: "Amazon", price: 28990, url: "https://www.amazon.in/dp/B09XS7JWHH", isSmartDeal: false, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Sony WH-1000XM5 Wireless Headphones" }
             ],
+            similarProducts: [
+                {
+                    source: "Amazon",
+                    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones",
+                    price: 19990,
+                    url: "https://www.amazon.in/dp/B0863TXGM3",
+                    matchType: "similar",
+                    similarityTier: "close_variant",
+                    confidence: 0.85,
+                    differences: ["Model generation differs: WH-1000XM4 instead of WH-1000XM5"],
+                    comparisonEligible: false
+                }
+            ],
+            noExactMatchMessage: null,
+            comparisonSummary: {
+                comparisonType: "exact_match",
+                comparisonWarning: null
+            },
             aiPrediction: { trend: "stable", expectedPrice: 26990, recommendation: "Price is stable. Great deal on Flipkart.", confidence: 85 }
         },
         {
             _id: "mock_3",
             title: "Nike Air Max 270 Running Shoes",
+            cleanTitle: "Nike Air Max 270 Running Shoes",
+            rawTitle: "Nike Air Max 270 Running Shoes",
             brand: "Nike",
             category: "Fashion",
             imageUrl: "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
             platforms: [
-                { name: "Amazon", price: 8995, url: "https://www.amazon.in/dp/B0787H96K6", isSmartDeal: true, pricePrefix: "" },
-                { name: "Meesho", price: 9499, url: "https://www.meesho.com/nike-air-max-270-running-shoes/p/2x4y6z", isSmartDeal: false, pricePrefix: "" }
+                { name: "Amazon", price: 8995, url: "https://www.amazon.in/dp/B0787H96K6", isSmartDeal: true, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Nike Air Max 270 Running Shoes" },
+                { name: "Meesho", price: 9499, url: "https://www.meesho.com/nike-air-max-270-running-shoes/p/2x4y6z", isSmartDeal: false, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Nike Air Max 270 Running Shoes" }
             ],
+            similarProducts: [],
+            noExactMatchMessage: null,
+            comparisonSummary: {
+                comparisonType: "exact_match",
+                comparisonWarning: null
+            },
             aiPrediction: { trend: "rise", expectedPrice: 9999, recommendation: "Price expected to rise! Buy now.", confidence: 88 }
         },
         {
             _id: "mock_4",
             title: "Samsung Galaxy S24 Ultra 5G",
+            cleanTitle: "Samsung Galaxy S24 Ultra 5G",
+            rawTitle: "Samsung Galaxy S24 Ultra 5G",
             brand: "Samsung",
             category: "Electronics",
             imageUrl: "https://m.media-amazon.com/images/I/71RVuW369lL._SL1500_.jpg",
             platforms: [
-                { name: "Amazon", price: 129999, url: "https://www.amazon.in/dp/B0CS5X6JCD", isSmartDeal: true, pricePrefix: "" },
-                { name: "Flipkart", price: 131999, pricePrefix: "Starting from ", url: "https://www.flipkart.com/samsung-galaxy-s24-ultra-5g-titanium-gray-256-gb/p/itm3d25ef6ab1332", isSmartDeal: false }
+                { name: "Amazon", price: 129999, url: "https://www.amazon.in/dp/B0CS5X6JCD", isSmartDeal: true, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Samsung Galaxy S24 Ultra 5G" },
+                { name: "Flipkart", price: 131999, pricePrefix: "Starting from ", url: "https://www.flipkart.com/samsung-galaxy-s24-ultra-5g-titanium-gray-256-gb/p/itm3d25ef6ab1332", isSmartDeal: false, comparisonEligible: true, matchStatus: "exact_match", productTitle: "Samsung Galaxy S24 Ultra 5G" }
             ],
+            similarProducts: [
+                {
+                    source: "Flipkart",
+                    title: "Samsung Galaxy S24 5G (8GB RAM, 256GB Storage)",
+                    price: 69999,
+                    url: "https://www.flipkart.com/samsung-galaxy-s24-5g/p/itm12345",
+                    matchType: "similar",
+                    similarityTier: "comparable_alternative",
+                    confidence: 0.78,
+                    differences: ["Model differs: Galaxy S24 instead of Galaxy S24 Ultra"],
+                    comparisonEligible: false
+                }
+            ],
+            noExactMatchMessage: null,
+            comparisonSummary: {
+                comparisonType: "exact_match",
+                comparisonWarning: null
+            },
             aiPrediction: { trend: "drop", expectedPrice: 124999, recommendation: "Wait for festival sale price drop.", confidence: 90 }
         },
         {
             _id: "mock_5",
             title: "Men's Slim Fit Cotton Casual Shirt",
+            cleanTitle: "Men's Slim Fit Cotton Casual Shirt",
+            rawTitle: "Men's Slim Fit Cotton Casual Shirt",
             brand: "Puma",
             category: "Fashion",
             imageUrl: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab",
             platforms: [
-                { name: "Meesho", price: 699, url: "https://www.meesho.com/mens-slim-fit-cotton-casual-shirt/p/3m5n7p", isSmartDeal: true, pricePrefix: "" },
-                { name: "Flipkart", price: 899, pricePrefix: "Starting from ", url: "https://www.flipkart.com/puma-men-solid-casual-shirt/p/itm8901234567890", isSmartDeal: false }
+                { name: "Meesho", price: 699, url: "https://www.meesho.com/mens-slim-fit-cotton-casual-shirt/p/3m5n7p", isSmartDeal: true, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Men's Slim Fit Cotton Casual Shirt" },
+                { name: "Flipkart", price: 899, pricePrefix: "Starting from ", url: "https://www.flipkart.com/puma-men-solid-casual-shirt/p/itm8901234567890", isSmartDeal: false, comparisonEligible: true, matchStatus: "exact_match", productTitle: "Men's Slim Fit Cotton Casual Shirt" }
             ],
+            similarProducts: [],
+            noExactMatchMessage: null,
+            comparisonSummary: {
+                comparisonType: "exact_match",
+                comparisonWarning: null
+            },
             aiPrediction: { trend: "stable", expectedPrice: 699, recommendation: "Best price guaranteed on Meesho.", confidence: 80 }
         },
         {
             _id: "mock_6",
             title: "Dell XPS 13 Intel Core i7 Laptop",
+            cleanTitle: "Dell XPS 13 Intel Core i7 Laptop",
+            rawTitle: "Dell XPS 13 Intel Core i7 Laptop",
             brand: "Dell",
             category: "Electronics",
             imageUrl: "https://images.unsplash.com/photo-1593642632823-8f785ba67e45",
             platforms: [
-                { name: "Amazon", price: 114990, url: "https://www.amazon.in/dp/B0B5HSJ212", isSmartDeal: true, pricePrefix: "" },
-                { name: "Croma", price: 119990, url: "https://www.croma.com/dell-xps-13-intel-core-i7-laptop/p/261234", isSmartDeal: false, pricePrefix: "" }
+                { name: "Amazon", price: 114990, url: "https://www.amazon.in/dp/B0B5HSJ212", isSmartDeal: true, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Dell XPS 13 Intel Core i7 Laptop" },
+                { name: "Croma", price: 119990, url: "https://www.croma.com/dell-xps-13-intel-core-i7-laptop/p/261234", isSmartDeal: false, pricePrefix: "", comparisonEligible: true, matchStatus: "exact_match", productTitle: "Dell XPS 13 Intel Core i7 Laptop" }
             ],
+            similarProducts: [],
+            noExactMatchMessage: null,
+            comparisonSummary: {
+                comparisonType: "exact_match",
+                comparisonWarning: null
+            },
             aiPrediction: { trend: "drop", expectedPrice: 109990, recommendation: "Price drop predicted in 1 week.", confidence: 87 }
         }
     ];
@@ -375,7 +519,10 @@ app.get("/products/search-live", async (req, res) => {
         return res.status(400).json({ status: "error", message: "Query parameter is required" });
     }
 
-    const cleanQuery = query.trim();
+    const cleanQuery = productNormalizer.buildSearchQuery(query);
+    if (!cleanQuery) {
+        return res.status(400).json({ status: "error", message: "A valid product query is required" });
+    }
 
     try {
         const eligibleSources = sourceSelector.getEligibleSources({
@@ -384,7 +531,7 @@ app.get("/products/search-live", async (req, res) => {
             category: category
         });
 
-        console.log(`[SearchLive] Query: "${cleanQuery}", Category: "${category || 'Auto'}", Eligible Sources: [${eligibleSources.join(', ')}]`);
+        console.log(`[SearchLive] Clean Query: "${cleanQuery}" (from raw: "${query}"), Category: "${category || 'Auto'}", Eligible Sources: [${eligibleSources.join(', ')}]`);
 
         // Helper to run scrapers with individual 12s timeout safety
         const runWithTimeout = (sourceName, promise, ms = 12000) => {
@@ -452,102 +599,86 @@ app.get("/products/search-live", async (req, res) => {
 
             const raw = normRef._raw;
 
-            // Start building the platforms array with the reference item
+            // Start building the exact match platforms array with the reference item
             const referencePlatform = {
                 name: raw.platform,
                 price: raw.price,
                 url: normRef.url,
                 isSmartDeal: false,
                 pricePrefix: raw.platform === 'Flipkart' ? 'Starting from ' : '',
-                productTitle: raw.title,
+                productTitle: normRef.cleanTitle || raw.title,
                 matchStatus: 'reference',
                 matchConfidence: 1.0,
                 matchedAttributes: [],
                 differingAttributes: [],
-                matchReasons: ['Reference listing']
+                differences: [],
+                matchReasons: ['Reference listing'],
+                comparisonEligible: true
             };
 
-            const platforms = [referencePlatform];
+            const exactPlatforms = [referencePlatform];
+            const nonExactCandidates = [];
 
             // Match every candidate from other stores against this reference
             for (const normCand of normalisedItems) {
-                if (normCand._raw.platform === raw.platform) continue;
-                if (processedUrls.has(normCand.url)) continue;
+                if (normCand.url === normRef.url) continue;
 
                 const matchResult = matcher.matchProducts(normRef, normCand);
-
-                // Log diagnostics safely (no credentials)
                 matcher.logDiagnostics(normCand, matchResult);
 
-                const isAcceptable = matchResult.matchStatus === 'exact_match'
-                    || matchResult.matchStatus === 'variant_match'
-                    || matchResult.matchStatus === 'unit_price_only';
-
-                if (isAcceptable && !platforms.some(p => p.name === normCand._raw.platform)) {
-                    processedUrls.add(normCand.url);
-                    platforms.push({
-                        name: normCand._raw.platform,
-                        price: normCand._raw.price,
-                        url: normCand.url,
-                        isSmartDeal: false,
-                        pricePrefix: normCand._raw.platform === 'Flipkart' ? 'Starting from ' : '',
-                        productTitle: normCand._raw.title,
-                        matchStatus: matchResult.matchStatus,
-                        matchConfidence: matchResult.confidence,
-                        matchedAttributes: matchResult.matchedAttributes,
-                        differingAttributes: matchResult.differingAttributes,
-                        matchReasons: matchResult.reasons,
-                        unitPriceA: matchResult.unitPriceA || null,
-                        unitPriceB: matchResult.unitPriceB || null,
-                        unitLabel: matchResult.unitLabel || null
-                    });
-                } else if (!isAcceptable) {
-                    console.log(`[Matcher] Excluded ${normCand._raw.platform} listing:`, matchResult.rejectedAttributes[0] || matchResult.reasons[matchResult.reasons.length - 1]);
-                }
-            }
-
-            // Only include stores with REAL scraped prices — never fabricate
-            const realPlatforms = platforms.filter(p => eligibleStores.includes(p.name) && p.price > 0);
-            if (realPlatforms.length === 0) continue;
-
-            realPlatforms.sort((a, b) => a.price - b.price);
-            realPlatforms.forEach(p => { p.isSmartDeal = false; });
-            realPlatforms[0].isSmartDeal = true;
-
-            const minPrice = realPlatforms[0].price;
-            const baseTitle = raw.title;
-
-            // Determine the overall comparison summary for this product group
-            const nonRefPlatforms = realPlatforms.filter(p => p.matchStatus !== 'reference');
-            let overallMatchStatus = 'no_match';
-            let comparisonWarning = null;
-            let unitPriceLabel = null;
-
-            if (nonRefPlatforms.length === 0) {
-                overallMatchStatus = 'no_match';
-                comparisonWarning = `No matching listing found on other stores for: ${baseTitle.substring(0, 60)}`;
-            } else {
-                // Use the best match status across all candidate platforms
-                if (nonRefPlatforms.some(p => p.matchStatus === 'exact_match')) {
-                    overallMatchStatus = 'exact_match';
-                } else if (nonRefPlatforms.some(p => p.matchStatus === 'variant_match')) {
-                    overallMatchStatus = 'variant_match';
-                    const diffP = nonRefPlatforms.find(p => p.matchStatus === 'variant_match');
-                    if (diffP && diffP.differingAttributes.length > 0) {
-                        comparisonWarning = `Similar variant — ${diffP.differingAttributes.join(', ')} differs`;
+                // STRICT EXACT MATCHING ONLY for cross-store price comparison
+                if (normCand._raw.platform !== raw.platform && !processedUrls.has(normCand.url) && matchResult.matchStatus === 'exact_match') {
+                    if (!exactPlatforms.some(p => p.name === normCand._raw.platform)) {
+                        processedUrls.add(normCand.url);
+                        exactPlatforms.push({
+                            name: normCand._raw.platform,
+                            price: normCand._raw.price,
+                            url: normCand.url,
+                            isSmartDeal: false,
+                            pricePrefix: normCand._raw.platform === 'Flipkart' ? 'Starting from ' : '',
+                            productTitle: normCand.cleanTitle || normCand._raw.title,
+                            matchStatus: 'exact_match',
+                            matchConfidence: matchResult.confidence,
+                            matchedAttributes: matchResult.matchedAttributes,
+                            differingAttributes: matchResult.differingAttributes,
+                            differences: [],
+                            matchReasons: matchResult.reasons,
+                            comparisonEligible: true
+                        });
                     }
-                } else if (nonRefPlatforms.some(p => p.matchStatus === 'unit_price_only')) {
-                    overallMatchStatus = 'unit_price_only';
-                    const uP = nonRefPlatforms.find(p => p.matchStatus === 'unit_price_only');
-                    unitPriceLabel = uP ? uP.unitLabel : null;
-                    comparisonWarning = 'Comparable product, different pack/quantity — price per unit shown';
+                } else if (normCand.url !== normRef.url) {
+                    nonExactCandidates.push(normCand);
                 }
             }
+
+            // Find Similar Products for this reference item
+            const similarProducts = matcher.findSimilarProducts(normRef, nonExactCandidates);
+
+            // Filter real exact platforms
+            const realExactPlatforms = exactPlatforms.filter(p => eligibleStores.includes(p.name) && p.price > 0);
+            if (realExactPlatforms.length === 0) continue;
+
+            // Sort exact platforms by price ascending
+            realExactPlatforms.sort((a, b) => a.price - b.price);
+            realExactPlatforms.forEach(p => { p.isSmartDeal = false; });
+            realExactPlatforms[0].isSmartDeal = true; // Cheapest exact match
+
+            const minPrice = realExactPlatforms[0].price;
+            const baseTitle = normRef.cleanTitle || raw.title;
+
+            // Comparison Summary & Messages
+            const nonRefExactCount = realExactPlatforms.filter(p => p.matchStatus !== 'reference').length;
+            const overallMatchStatus = nonRefExactCount > 0 ? 'exact_match' : 'no_match';
+            const noExactMatchMessage = nonRefExactCount === 0 && similarProducts.length > 0
+                ? "No exact match found across other stores. Here are similar alternatives."
+                : null;
 
             const comparisonSummary = {
                 comparisonType: overallMatchStatus,
-                comparisonWarning,
-                unitPriceLabel
+                comparisonWarning: nonRefExactCount === 0
+                    ? `No exact match found on other stores for: ${baseTitle.substring(0, 60)}`
+                    : null,
+                unitPriceLabel: null
             };
 
             const classification = sourceSelector.classifyQuery(baseTitle, category);
@@ -575,16 +706,20 @@ app.get("/products/search-live", async (req, res) => {
                 if (newProd) productDoc = newProd[0];
             }
 
-            const aiPrediction = await generatePredictionAsync(productDoc, minPrice, realPlatforms);
+            const aiPrediction = await generatePredictionAsync(productDoc, minPrice, realExactPlatforms);
 
             const stableId = productDoc ? productDoc.id : createStableProductId(baseTitle, normRef.url);
             const productObj = {
                 _id: stableId,
                 title: baseTitle,
+                cleanTitle: normRef.cleanTitle || baseTitle,
+                rawTitle: normRef.rawTitle || raw.title,
                 brand: normRef.brand || 'Verified Deal',
                 category: classification,
                 imageUrl: raw.imageUrl || 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f',
-                platforms: realPlatforms,
+                platforms: realExactPlatforms,
+                similarProducts: similarProducts,
+                noExactMatchMessage,
                 comparisonSummary,
                 aiPrediction
             };

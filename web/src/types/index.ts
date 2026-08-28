@@ -26,16 +26,35 @@ export interface Platform {
   isSmartDeal: boolean;
   /** The actual listing title on this platform (may differ from the query title) */
   productTitle?: string;
+  /** Clean title extracted without UI artifacts */
+  cleanTitle?: string;
+  rawTitle?: string;
   /** How well this platform listing matches the reference listing */
   matchStatus?: MatchStatus;
   matchConfidence?: number;
   matchedAttributes?: string[];
   differingAttributes?: string[];
+  differences?: string[];
   matchReasons?: string[];
+  /** Flag indicating if this platform is eligible for exact price comparison */
+  comparisonEligible?: boolean;
   /** Unit price fields — populated for unit_price_only matches */
   unitPriceA?: number | null;
   unitPriceB?: number | null;
   unitLabel?: string | null;
+}
+
+export interface SimilarProduct {
+  source: string;
+  title: string;
+  price: number;
+  url: string;
+  imageUrl?: string;
+  matchType: 'similar';
+  similarityTier: 'close_variant' | 'comparable_alternative' | 'related_product';
+  confidence: number;
+  differences: string[];
+  comparisonEligible: boolean;
 }
 
 export interface PriceHistoryItem {
@@ -68,10 +87,14 @@ export interface ComparisonSummary {
 export interface Product {
   _id: string;
   title: string;
+  cleanTitle?: string;
+  rawTitle?: string;
   brand: string;
   category: string;
   imageUrl: string;
   platforms: Platform[];
+  similarProducts?: SimilarProduct[];
+  noExactMatchMessage?: string | null;
   price_history?: PriceHistoryItem[];
   aiPrediction: AiPrediction;
   /** Structured comparison summary — tells UI how safe it is to compare prices */

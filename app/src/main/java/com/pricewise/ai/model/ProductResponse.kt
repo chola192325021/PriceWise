@@ -26,10 +26,14 @@ data class UserAlertsResponse(
 data class Product(
     @SerializedName("_id") val id: String,
     @SerializedName("title") val title: String,
+    @SerializedName("cleanTitle") val cleanTitle: String? = null,
+    @SerializedName("rawTitle") val rawTitle: String? = null,
     @SerializedName("brand") val brand: String,
     @SerializedName("category") val category: String,
     @SerializedName("imageUrl") val imageUrl: String,
     @SerializedName("platforms") val platforms: List<Platform>,
+    @SerializedName("similarProducts") val similarProducts: List<SimilarProduct>? = null,
+    @SerializedName("noExactMatchMessage") val noExactMatchMessage: String? = null,
     @SerializedName("aiPrediction") val aiPrediction: AiPrediction,
     /** Structured comparison summary — tells UI how trustworthy the price comparison is */
     @SerializedName("comparisonSummary") val comparisonSummary: ComparisonSummary? = null
@@ -47,16 +51,33 @@ data class Platform(
     @SerializedName("isSmartDeal") val isSmartDeal: Boolean,
     /** The actual listing title on this platform (may differ from the product title) */
     @SerializedName("productTitle") val productTitle: String? = null,
+    @SerializedName("cleanTitle") val cleanTitle: String? = null,
+    @SerializedName("rawTitle") val rawTitle: String? = null,
     /** Match quality relative to the reference listing */
     @SerializedName("matchStatus") val matchStatus: String? = null,
     @SerializedName("matchConfidence") val matchConfidence: Double? = null,
     @SerializedName("matchedAttributes") val matchedAttributes: List<String>? = null,
     @SerializedName("differingAttributes") val differingAttributes: List<String>? = null,
+    @SerializedName("differences") val differences: List<String>? = null,
     @SerializedName("matchReasons") val matchReasons: List<String>? = null,
+    @SerializedName("comparisonEligible") val comparisonEligible: Boolean? = true,
     /** Unit price fields — populated for unit_price_only matches */
     @SerializedName("unitPriceA") val unitPriceA: Double? = null,
     @SerializedName("unitPriceB") val unitPriceB: Double? = null,
     @SerializedName("unitLabel") val unitLabel: String? = null
+)
+
+data class SimilarProduct(
+    @SerializedName("source") val source: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("price") val price: Double,
+    @SerializedName("url") val url: String,
+    @SerializedName("imageUrl") val imageUrl: String? = null,
+    @SerializedName("matchType") val matchType: String = "similar",
+    @SerializedName("similarityTier") val similarityTier: String,
+    @SerializedName("confidence") val confidence: Double,
+    @SerializedName("differences") val differences: List<String>? = null,
+    @SerializedName("comparisonEligible") val comparisonEligible: Boolean = false
 )
 
 /** Top-level comparison summary for the whole product's cross-platform match quality. */

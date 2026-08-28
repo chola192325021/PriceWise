@@ -13,7 +13,7 @@ const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; load
     );
   }
 
-  if (!forecastData || forecastData.forecast.length === 0) {
+  if (!forecastData || !forecastData.forecast || forecastData.forecast.length === 0) {
     return null;
   }
 
@@ -97,6 +97,8 @@ import {
 } from 'lucide-react';
 
 const PredictionCard: React.FC<{ prediction: Product['aiPrediction'] }> = ({ prediction }) => {
+  if (!prediction) return null;
+
   const getStatusColor = () => {
     switch (prediction.status) {
       case 'CONFIDENT_FORECAST': return 'bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-900/60 text-green-700 dark:text-green-300';
@@ -454,7 +456,8 @@ const ProductDetailPage: React.FC = () => {
     price: h.price
   })) || [];
 
-  const cheapestPlatform = product.platforms.find(p => p.isSmartDeal) || product.platforms[0];
+  const eligiblePlatforms = (product.platforms || []).filter(p => p.comparisonEligible !== false);
+  const cheapestPlatform = eligiblePlatforms.find(p => p.isSmartDeal) || eligiblePlatforms[0] || (product.platforms && product.platforms[0]);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -523,11 +526,11 @@ const ProductDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Pricing and Predictions */}
+          {/* Right: Pricing and Predictions */}
         <div>
           <div className="mb-8">
             <div className="text-sm text-blue-600 dark:text-blue-400 font-bold uppercase tracking-widest mb-2">{product.brand} • {product.category}</div>
-            <h1 className="text-3xl font-black text-slate-900 dark:text-slate-100 leading-tight mb-4">{product.title}</h1>
+            <h1 className="text-3xl font-black text-slate-900 dark:text-slate-100 leading-tight mb-4">{product.cleanTitle || product.title}</h1>
 
             <div className="flex items-baseline gap-4">
               <span className="text-4xl font-black text-slate-900 dark:text-slate-100">₹{cheapestPlatform?.price.toLocaleString()}</span>
@@ -542,17 +545,28 @@ const ProductDetailPage: React.FC = () => {
 
           <ChronosForecastCard forecastData={chronosForecast} loading={chronosLoading} />
 
+          {/* Exact Matches Section */}
           <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700/70 mb-8">
-            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center">
-              Available Offers
-              <ShieldCheck className="w-4 h-4 ml-2 text-green-500" />
+            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center justify-between">
+              <span className="flex items-center">
+                Exact Matches ({eligiblePlatforms.length})
+                <ShieldCheck className="w-4 h-4 ml-2 text-green-500" />
+              </span>
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Strictly Identical Product</span>
             </h3>
 
             {/* Comparison quality banner */}
             <ComparisonSummaryBanner summary={product.comparisonSummary} />
 
+            {product.noExactMatchMessage && (
+              <div className="text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/50 p-3 rounded-xl mb-4 flex items-center">
+                <Info className="w-4 h-4 mr-2 text-blue-500 flex-shrink-0" />
+                {product.noExactMatchMessage}
+              </div>
+            )}
+
             <div className="space-y-4">
-              {product.platforms.map((platform, idx) => (
+              {eligiblePlatforms.map((platform, idx) => (
                 <div
                   key={idx}
                   className={`p-4 rounded-2xl border ${
@@ -569,12 +583,12 @@ const ProductDetailPage: React.FC = () => {
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-slate-900 dark:text-slate-100">{platform.name}</div>
                         {/* Show the actual listing title if it differs */}
-                        {platform.productTitle && platform.productTitle !== product.title && (
+                        {platform.productTitle && platform.productTitle !== (product.cleanTitle || product.title) && (
                           <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 line-clamp-2 max-w-[220px]" title={platform.productTitle}>
                             Listed as: {platform.productTitle.substring(0, 70)}{platform.productTitle.length > 70 ? '…' : ''}
                           </div>
                         )}
-                        <MatchStatusBadge platform={platform} referenceTitle={product.title} />
+                        <MatchStatusBadge platform={platform} referenceTitle={product.cleanTitle || product.title} />
                       </div>
                     </div>
                     <div className="text-right flex items-center gap-4 ml-2 flex-shrink-0">
@@ -601,6 +615,74 @@ const ProductDetailPage: React.FC = () => {
               ))}
             </div>
           </div>
+
+          {/* Similar Products Section */}
+          {product.similarProducts && product.similarProducts.length > 0 && (
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 mb-8">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-slate-900 dark:text-slate-100 flex items-center">
+                  Similar Products ({product.similarProducts.length})
+                  <Info className="w-4 h-4 ml-2 text-blue-500" />
+                </h3>
+                <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-0.5 rounded-full border border-amber-200 dark:border-amber-800/60">
+                  Not included in exact comparison
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Comparable models, storage variants, or alternatives from verified stores.
+              </p>
+
+              <div className="space-y-3">
+                {product.similarProducts.map((sim, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0 pr-4">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{sim.source}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            sim.similarityTier === 'close_variant'
+                              ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                              : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                          }`}>
+                            {sim.similarityTier === 'close_variant' ? 'Similar Variant' : 'Comparable Alternative'}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 line-clamp-2 mb-2">
+                          {sim.title}
+                        </div>
+                        {sim.differences && sim.differences.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {sim.differences.map((diff, dIdx) => (
+                              <span key={dIdx} className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800/50">
+                                {diff}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right flex items-center gap-3 flex-shrink-0">
+                        <div className="font-black text-slate-900 dark:text-slate-100 text-base">
+                          ₹{sim.price.toLocaleString()}
+                        </div>
+                        <a
+                          href={sim.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                          title={`View on ${sim.source}`}
+                        >
+                          <ExternalLink className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

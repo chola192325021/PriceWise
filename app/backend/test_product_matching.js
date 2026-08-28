@@ -266,6 +266,32 @@ assert('8i. price preserved', testItem.price, 79999);
 assert('8j. _diagnostics present', typeof testItem._diagnostics, 'object');
 
 // ===========================================================================
+// SECTION 9 — findSimilarProducts tests
+// ===========================================================================
+section('9. findSimilarProducts — variant tiers & differences');
+
+const refS24_256 = mkItem('Amazon', 'Samsung Galaxy S24 5G 8GB RAM 256GB', 69999);
+const candS24_128 = mkItem('Flipkart', 'Samsung Galaxy S24 5G 8GB RAM 128GB', 62999);
+const candS24_Ultra = mkItem('Amazon', 'Samsung Galaxy S24 Ultra 12GB RAM 256GB', 109999);
+const candUnrelated = mkItem('Meesho', 'Men Casual Cotton Shirt Blue', 699);
+
+const similarResults = matcher.findSimilarProducts(refS24_256, [candS24_128, candS24_Ultra, candUnrelated]);
+
+assert('9a. Similar products returned', similarResults.length >= 2, true);
+
+const s24_128_sim = similarResults.find(s => s.title.includes('128GB'));
+assert('9b. S24 128GB is close_variant', s24_128_sim?.similarityTier, 'close_variant');
+assert('9c. S24 128GB mentions storage difference', s24_128_sim?.differences.some(d => d.includes('Storage differs')), true);
+assert('9d. S24 128GB comparisonEligible is false', s24_128_sim?.comparisonEligible, false);
+
+const s24_ultra_sim = similarResults.find(s => s.title.includes('Ultra'));
+assert('9e. S24 Ultra is comparable_alternative or close_variant', ['comparable_alternative', 'close_variant'].includes(s24_ultra_sim?.similarityTier), true);
+assert('9f. S24 Ultra comparisonEligible is false', s24_ultra_sim?.comparisonEligible, false);
+
+const unrelated_sim = similarResults.find(s => s.title.includes('Cotton Shirt'));
+assert('9g. Unrelated item excluded from similar', unrelated_sim === undefined, true);
+
+// ===========================================================================
 // RESULTS
 // ===========================================================================
 console.log(`\n${'═'.repeat(60)}`);
@@ -279,3 +305,4 @@ if (failed > 0) {
     console.log('\n  ✅  All tests PASSED.\n');
     process.exit(0);
 }
+

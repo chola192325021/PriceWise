@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import ChatbotPage from '../pages/ChatbotPage';
@@ -93,5 +93,93 @@ describe('PriceWise Web Feature & Theme Accessibility Tests', () => {
   it('renders ProductDetailPage loading and handles non-existent product gracefully', async () => {
     renderWithMemoryRouter(<ProductDetailPage />, ['/product/test_prod_123']);
     expect(screen.getByText(/Loading product details\.\.\.|Product Not Found/i)).toBeDefined();
+  });
+
+  it('renders clean title and separate Similar Products section on ProductDetailPage', async () => {
+    const mockDetailProduct = {
+      _id: 'prod_clean_1',
+      title: 'Add to Compare Samsung Galaxy S24 256GB',
+      cleanTitle: 'Samsung Galaxy S24 256GB',
+      brand: 'Samsung',
+      category: 'Smartphones',
+      imageUrl: 'https://example.com/s24.jpg',
+      platforms: [
+        {
+          name: 'Amazon',
+          price: 74999,
+          url: 'https://amazon.in/s24',
+          isSmartDeal: true,
+          matchStatus: 'exact_match',
+          comparisonEligible: true
+        },
+        {
+          name: 'Flipkart',
+          price: 75999,
+          url: 'https://flipkart.com/s24',
+          isSmartDeal: false,
+          matchStatus: 'exact_match',
+          comparisonEligible: true
+        }
+      ],
+      similarProducts: [
+        {
+          source: 'Croma',
+          title: 'Samsung Galaxy S24 128GB Onyx Black',
+          price: 69999,
+          url: 'https://croma.com/s24-128',
+          matchType: 'similar',
+          similarityTier: 'close_variant',
+          confidence: 0.85,
+          differences: ['Storage differs: 128GB instead of 256GB'],
+          comparisonEligible: false
+        }
+      ],
+      aiPrediction: {
+        status: 'drop',
+        trend: 'drop',
+        expectedPrice: 72000,
+        currentBestPrice: 74999,
+        bestPlatform: 'Amazon',
+        observedLowPrice: 74000,
+        historyDays: 30,
+        recommendation: 'WAIT',
+        confidence: 0.9,
+        confidenceLabel: 'High',
+        message: 'Price expected to drop',
+        reason: 'Past sales pattern'
+      }
+    };
+
+    const apiClient = (await import('../api/client')).default;
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (url.includes('/products/prod_clean_1') || url === '/products') {
+        return {
+          status: 200,
+          data: { status: 'success', data: mockDetailProduct }
+        } as any;
+      }
+      return { status: 200, data: { status: 'success', data: [] } } as any;
+    });
+
+    await act(async () => {
+      renderWithMemoryRouter(
+        <Routes>
+          <Route path="/product/:id" element={<ProductDetailPage />} />
+        </Routes>,
+        ['/product/prod_clean_1']
+      );
+    });
+
+    // Should display clean title without "Add to Compare"
+    expect(await screen.findByRole('heading', { level: 1, name: 'Samsung Galaxy S24 256GB' })).toBeDefined();
+    expect(screen.queryByText(/Add to Compare Samsung/i)).toBeNull();
+
+    // Should show Exact Matches section header
+    expect(screen.getByText(/Exact Matches \(2\)/i)).toBeDefined();
+
+    // Should show Similar Products section with difference note
+    expect(screen.getByText(/Similar Products \(1\)/i)).toBeDefined();
+    expect(screen.getByText(/Storage differs: 128GB instead of 256GB/i)).toBeDefined();
+    expect(screen.getByText(/Similar Variant/i)).toBeDefined();
   });
 });

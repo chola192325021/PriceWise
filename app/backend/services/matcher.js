@@ -2,9 +2,10 @@
  * PriceWise Product Entity Matcher
  *
  * Implements a structured, explainable product matching pipeline:
- *   1. normalizeProduct()  — extracts a canonical product schema from a raw scrape result
- *   2. classifyCategory()  — maps product to a matching-rule category
- *   3. matchProducts()     — scores two normalised products and returns a transparent result
+ *   1. normalizeProduct()     — extracts a canonical product schema from a raw scrape result
+ *   2. classifyCategory()     — maps product to a matching-rule category
+ *   3. matchProducts()        — scores two normalised products and returns a transparent result
+ *   4. findSimilarProducts()  — identifies and ranks similar variant / alternative products
  *
  * Hard-rejection rules ensure that different storage, model generation, form, or
  * quantity are NEVER presented as an "exact match".
@@ -13,6 +14,8 @@
  */
 
 'use strict';
+
+const { cleanProductTitle, buildSearchQuery } = require('./productNormalizer');
 
 // ---------------------------------------------------------------------------
 // Marketing noise to strip from titles before normalisation
@@ -23,7 +26,8 @@ const MARKETING_PHRASES = [
     'hot deal', 'deal of the day', 'lightning deal', 'sponsored', 'ad',
     'amazon choice', 'amazon\'s choice', "amazon's choice", 'prime deal',
     'exclusive', 'new arrival', 'just launched', 'limited edition launch',
-    'flash sale', 'clearance sale', 'buy now', 'shop now'
+    'flash sale', 'clearance sale', 'buy now', 'shop now', 'add to compare',
+    'add to cart', 'add to bag', 'add to wishlist', 'view details', 'view product'
 ];
 
 // ---------------------------------------------------------------------------
@@ -104,7 +108,8 @@ const COLOUR_MAP = {
     'purple': 'purple', 'lavender': 'lavender', 'violet': 'violet',
     'red': 'red', 'crimson': 'red',
     'orange': 'orange', 'coral': 'orange',
-    'pink': 'pink', 'rose': 'pink'
+    'pink': 'pink', 'rose': 'pink',
+    'amber yellow': 'yellow'
 };
 
 // ---------------------------------------------------------------------------
@@ -131,7 +136,7 @@ const CATEGORY_CRITICAL_ATTRS = {
  */
 function cleanTitle(title) {
     if (!title) return '';
-    let t = title.toLowerCase().trim();
+    let t = cleanProductTitle(title).toLowerCase().trim();
 
     // Remove marketing phrases
     for (const phrase of MARKETING_PHRASES) {
@@ -159,7 +164,6 @@ function extractBrand(title) {
     // Sort all aliases by length descending so longer, more-specific aliases win
     const sorted = Object.keys(BRAND_CANONICAL).sort((a, b) => b.length - a.length);
     for (const alias of sorted) {
-        // Must be a whole word / phrase match — not a substring of another word
         const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(`(?:^|[\\s,([])${escaped}(?:$|[\\s,)\\]])`, 'i');
         if (regex.test(t) || t.startsWith(alias) || t.endsWith(alias) || t.includes(` ${alias} `)) {
@@ -196,8 +200,6 @@ function normaliseModelString(model) {
 
 /**
  * Extracts storage in GB (handles TB too).
- * Prioritises storage-keyword contexts over RAM contexts to avoid confusion.
- * "256gb ROM", "256 GB Storage", "1TB SSD", "8GB RAM 256GB" → numeric GB value for STORAGE
  */
 function extractStorage(text) {
     if (!text) return null;
@@ -209,12 +211,10 @@ function extractStorage(text) {
                          || text.match(/\b(?:internal|storage|rom|ssd|emmc|ufs)\s*:\s*(\d+(?:\.\d+)?)\s*gb\b/i);
     if (storageCtxMatch) return parseFloat(storageCtxMatch[1]);
 
-    // Parenthesised spec sheet — take the LARGEST gb value that is not explicitly RAM
-    // e.g. "8GB RAM, 256 GB Storage" → 256
+    // Spec list — take the largest non-RAM GB
     const allGbMatches = [...text.matchAll(/\b(\d+(?:\.\d+)?)\s*gb\b/gi)];
     if (allGbMatches.length === 0) return null;
 
-    // Filter out those immediately followed by "ram" / "lpddr" / "ddr"
     const nonRamMatches = allGbMatches.filter(m => {
         const after = text.slice(m.index + m[0].length, m.index + m[0].length + 12).toLowerCase();
         return !after.match(/^\s*(?:ram|lpddr|ddr)/);
@@ -222,13 +222,9 @@ function extractStorage(text) {
 
     if (nonRamMatches.length === 0) return null;
 
-    // Return the LARGEST non-RAM GB value (storage is almost always larger than RAM)
     const values = nonRamMatches.map(m => parseFloat(m[1]));
     const largest = Math.max(...values);
 
-    // Sanity: typical RAM sizes are 2,3,4,6,8,12,16,32 GB; storage 32+
-    // If largest is ≤ 16 and there's no explicit storage context, treat as ambiguous → null
-    // (Better to miss storage than mis-classify 8 GB RAM as 8 GB storage)
     const commonRamSizes = new Set([1, 2, 3, 4, 6, 8, 10, 12, 16]);
     if (commonRamSizes.has(largest) && nonRamMatches.length === 1) return null;
 
@@ -237,8 +233,6 @@ function extractStorage(text) {
 
 /**
  * Extracts RAM in GB.
- * Requires the "ram" keyword to be present to avoid confusing it with storage.
- * "8gb ram", "8 GB RAM", "lpddr5 8gb" → 8
  */
 function extractRam(text) {
     if (!text) return null;
@@ -252,7 +246,6 @@ function extractRam(text) {
 
 /**
  * Extracts capacity in millilitres.
- * "650ml", "650 ml", "1 litre", "1L", "500 mL" → numeric ml value
  */
 function extractCapacityMl(text) {
     if (!text) return null;
@@ -265,20 +258,18 @@ function extractCapacityMl(text) {
 
 /**
  * Extracts weight in grams.
- * "2kg", "2 kg", "500g", "500 g", "1.5 KG" → numeric grams value
  */
 function extractWeightG(text) {
     if (!text) return null;
     const kgMatch = text.match(/\b(\d+(?:\.\d+)?)\s*kg\b/i);
     if (kgMatch) return parseFloat(kgMatch[1]) * 1000;
-    const gMatch = text.match(/\b(\d+(?:\.\d+)?)\s*g\b(?!\s*b)/i); // "g" but not "gb"
+    const gMatch = text.match(/\b(\d+(?:\.\d+)?)\s*g\b(?!\s*b)/i);
     if (gMatch) return parseFloat(gMatch[1]);
     return null;
 }
 
 /**
  * Extracts item count / pack count.
- * "Pack of 2", "2 pack", "set of 3", "2 x 500ml", "combo of 2" → {packCount, quantity}
  */
 function extractPackInfo(text) {
     if (!text) return { packCount: 1, quantity: 1 };
@@ -287,7 +278,7 @@ function extractPackInfo(text) {
                    || text.match(/\b(\d+)\s*[- ]?\s*pack\b/i)
                    || text.match(/\bset\s+of\s+(\d+)\b/i)
                    || text.match(/\bcombo\s+of\s+(\d+)\b/i)
-                   || text.match(/\b(\d+)\s*x\s*\d+/i);  // "2 x 500ml"
+                   || text.match(/\b(\d+)\s*x\s*\d+/i);
     const packCount = packMatch ? parseInt(packMatch[1], 10) : 1;
 
     return { packCount, quantity: packCount };
@@ -310,7 +301,6 @@ function extractConnectivity(text) {
 function extractColor(text) {
     if (!text) return null;
     const t = text.toLowerCase();
-    // Try longest colour phrases first
     const sorted = Object.keys(COLOUR_MAP).sort((a, b) => b.length - a.length);
     for (const phrase of sorted) {
         if (t.includes(phrase)) return COLOUR_MAP[phrase];
@@ -319,7 +309,7 @@ function extractColor(text) {
 }
 
 /**
- * Extracts size (clothing / footwear) like "size 9", "uk 9", "S", "M", "XL", "42"
+ * Extracts size (clothing / footwear)
  */
 function extractSize(text) {
     if (!text) return null;
@@ -332,7 +322,7 @@ function extractSize(text) {
 }
 
 /**
- * Extracts gender signals: "men", "women", "boys", "girls", "unisex"
+ * Extracts gender signals
  */
 function extractGender(text) {
     if (!text) return null;
@@ -346,8 +336,7 @@ function extractGender(text) {
 }
 
 /**
- * Extracts product form (shampoo, conditioner, etc.) from FORM_GROUPS.
- * Returns {group, form} or null.
+ * Extracts product form from FORM_GROUPS.
  */
 function extractProductForm(text) {
     if (!text) return null;
@@ -361,14 +350,12 @@ function extractProductForm(text) {
 }
 
 /**
- * Extracts phone-specific model identifiers: "s24 ultra", "s24+", "pro max", etc.
- * Returns a normalised key or null.
+ * Extracts phone-specific model identifiers
  */
 function extractPhoneEdition(text) {
     if (!text) return null;
     const t = text.toLowerCase();
 
-    // iPhone variants — order matters (most specific first)
     const iphoneEditions = [
         'pro max', 'pro', 'plus', 'mini',
         'ultra', 'fe', 'edge', 'fold', 'flip',
@@ -381,7 +368,6 @@ function extractPhoneEdition(text) {
         }
     }
 
-    // Samsung Galaxy S/A/M/Z
     const galaxyMatch = t.match(/galaxy\s+[szamf]\d+\s*([a-z+\s]*)/);
     if (galaxyMatch && galaxyMatch[1].trim()) {
         const ed = galaxyMatch[1].trim().replace(/[^a-z+]/g, '');
@@ -392,45 +378,37 @@ function extractPhoneEdition(text) {
 }
 
 /**
- * Extracts the core model name token(s) (phone series, product line, etc.)
- * e.g. "Galaxy S24", "WH-1000XM5", "MacBook Pro", "iPhone 15 Pro"
+ * Extracts the core model name token(s)
  */
 function extractModel(title, brand) {
     if (!title) return null;
     let t = cleanTitle(title);
 
-    // Remove brand name if found
     if (brand) {
         t = t.replace(new RegExp(`\\b${brand}\\b`, 'gi'), '').trim();
     }
 
-    // For Sony headphones pattern
     const sonyMatch = t.match(/\b(wh|wf|xm|mdr|ath)-?[\w]+\b/i);
     if (sonyMatch) return normaliseModelString(sonyMatch[0]);
 
-    // For iPhone
     const iphoneMatch = t.match(/iphone\s*(\d+(?:\s+(?:pro\s+max|pro|plus|mini))?)/i);
     if (iphoneMatch) return normaliseModelString(iphoneMatch[0]);
 
-    // For Galaxy
     const galaxyMatch = t.match(/galaxy\s+[a-z]\d+\s*(?:\+|ultra|fe|plus|fold|flip|edge|lite)?/i);
     if (galaxyMatch) return normaliseModelString(galaxyMatch[0]);
 
-    // For MacBook
     const macMatch = t.match(/macbook\s+(?:pro|air|mini)?(?:\s+\d+)?/i);
     if (macMatch) return normaliseModelString(macMatch[0]);
 
-    // For laptop model numbers (XPS 13, Inspiron 15, etc.)
     const laptopMatch = t.match(/\b(xps|inspiron|pavilion|envy|spectre|ideapad|thinkpad|zenbook|vivobook|nitro|aspire|swift|predator|rog\s+\w+)\s*\d*/i);
     if (laptopMatch) return normaliseModelString(laptopMatch[0]);
 
-    // Generic: take the first meaningful 2-3 word token
     const words = t.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1);
     return words.slice(0, 3).join('');
 }
 
 /**
- * Computes token overlap ratio between two strings (Jaccard-like on word sets).
+ * Computes token overlap ratio between two strings.
  */
 function tokenSimilarity(a, b) {
     if (!a || !b) return 0;
@@ -449,17 +427,18 @@ function tokenSimilarity(a, b) {
 /**
  * Converts a raw scraped item into the structured PriceWise product schema.
  *
- * @param {Object} rawItem  Raw scrape result: { platform, title, price, url, imageUrl }
+ * @param {Object} rawItem  Raw scrape result: { platform, title, price, url, imageUrl, rawTitle }
  * @returns {Object} Normalised product schema
  */
 function normalizeProduct(rawItem) {
     if (!rawItem) return null;
 
-    const title = rawItem.title || '';
-    const normalizedTitle = cleanTitle(title);
-    const brand = extractBrand(title);
-    const modelNumber = extractModelNumber(title);
-    const model = extractModel(title, brand);
+    const rawTitle = rawItem.rawTitle || rawItem.title || '';
+    const cleanTitleStr = cleanProductTitle(rawTitle);
+    const normalizedTitle = cleanTitle(cleanTitleStr);
+    const brand = extractBrand(cleanTitleStr);
+    const modelNumber = extractModelNumber(cleanTitleStr);
+    const model = extractModel(cleanTitleStr, brand);
     const form = extractProductForm(normalizedTitle);
     const packInfo = extractPackInfo(normalizedTitle);
 
@@ -480,7 +459,6 @@ function normalizeProduct(rawItem) {
         other: {}
     };
 
-    // Derive ASIN from Amazon URL if available
     let sourceProductId = null;
     try {
         const urlStr = rawItem.url || '';
@@ -488,14 +466,12 @@ function normalizeProduct(rawItem) {
                        || urlStr.match(/\/gp\/product\/([A-Z0-9]{10})/i);
         if (asinMatch) sourceProductId = asinMatch[1].toUpperCase();
 
-        // Flipkart product ID from /p/itm...
         if (!sourceProductId) {
             const fkMatch = urlStr.match(/\/p\/(itm[a-z0-9]+)/i);
             if (fkMatch) sourceProductId = fkMatch[1];
         }
     } catch (_) {}
 
-    // Count how many fields we actually extracted to gauge confidence
     const extractedCount = [
         brand, modelNumber, model,
         variant.storageGb, variant.ramGb, variant.capacityMl,
@@ -508,7 +484,9 @@ function normalizeProduct(rawItem) {
         source: (rawItem.platform || 'unknown').toLowerCase(),
         sourceProductId,
         url: rawItem.url || '',
-        title,
+        rawTitle,
+        title: cleanTitleStr || rawTitle,
+        cleanTitle: cleanTitleStr || rawTitle,
         normalizedTitle,
         brand,
         model,
@@ -520,9 +498,9 @@ function normalizeProduct(rawItem) {
         imageUrl: rawItem.imageUrl || '',
         extractedConfidence,
 
-        // Diagnostics (not sent to client)
         _diagnostics: {
-            rawTitle: title,
+            rawTitle,
+            cleanTitle: cleanTitleStr,
             normalizedTitle,
             brand,
             model,
@@ -557,37 +535,18 @@ const GROCERY_BEAUTY_KEYWORDS = ['shampoo', 'conditioner', 'lotion', 'moisturise
 const FASHION_KEYWORDS = ['shirt', 't-shirt', 'jeans', 'trouser', 'dress', 'shoe', 'sneaker', 'sandal', 'boot', 'saree', 'kurta', 'kurti', 'jacket'];
 const BOOK_KEYWORDS = ['book', 'novel', 'paperback', 'hardcover', 'ebook', 'isbn', 'edition'];
 
-/**
- * Classifies a normalised product into a matching-rule category.
- *
- * @param {Object} product Normalised product from normalizeProduct()
- * @returns {string} Category key
- */
 function classifyCategory(product) {
     if (!product) return 'general';
     const t = (product.normalizedTitle || '').toLowerCase();
     const brand = product.brand || '';
 
-    // Phone
     if (PHONE_KEYWORDS.some(kw => t.includes(kw))) return 'electronics_phone';
     if (PHONE_BRANDS.includes(brand) && /\b\d+\b/.test(t)) return 'electronics_phone';
-
-    // Laptop
     if (LAPTOP_KEYWORDS.some(kw => t.includes(kw))) return 'electronics_laptop';
-
-    // TV
     if (TV_KEYWORDS.some(kw => t.includes(kw))) return 'electronics_tv';
-
-    // Headphones / earbuds
     if (HEADPHONES_KEYWORDS.some(kw => t.includes(kw))) return 'electronics_headphones';
-
-    // Books
     if (BOOK_KEYWORDS.some(kw => t.includes(kw))) return 'books';
-
-    // Grocery / beauty
     if (GROCERY_BEAUTY_KEYWORDS.some(kw => t.includes(kw))) return 'grocery_beauty';
-
-    // Fashion
     if (FASHION_KEYWORDS.some(kw => t.includes(kw))) return 'fashion';
 
     return 'general';
@@ -597,13 +556,8 @@ function classifyCategory(product) {
 // SECTION 4 — Hard rejection rules
 // ===========================================================================
 
-/**
- * Checks a pair of normalised products against hard-rejection rules.
- *
- * @returns {Object|null}  null if no hard rejection; { reason } if rejected
- */
 function applyHardRejections(a, b, category) {
-    // Rule 1: Different canonical brand (when both available)
+    // Rule 1: Different canonical brand
     if (a.brand && b.brand && a.brand !== b.brand) {
         return { reason: `Rejected: Brand mismatch — ${a.brand} ≠ ${b.brand}` };
     }
@@ -617,7 +571,7 @@ function applyHardRejections(a, b, category) {
         }
     }
 
-    // Rule 3: Different model number (when both available)
+    // Rule 3: Different model number
     if (a.modelNumber && b.modelNumber) {
         const normA = normaliseModelString(a.modelNumber);
         const normB = normaliseModelString(b.modelNumber);
@@ -633,20 +587,19 @@ function applyHardRejections(a, b, category) {
         }
     }
 
-    // Rule 5: Contradictory RAM (only when both explicitly extracted)
+    // Rule 5: Contradictory RAM
     if (a.variant.ramGb !== null && b.variant.ramGb !== null) {
         if (a.variant.ramGb !== b.variant.ramGb) {
             return { reason: `Rejected: RAM mismatch — ${a.variant.ramGb} GB ≠ ${b.variant.ramGb} GB` };
         }
     }
 
-    // Rule 6: Contradictory phone edition (S24 vs S24 Ultra etc.)
+    // Rule 6: Contradictory phone edition
     if (a.variant.edition !== null && b.variant.edition !== null) {
         if (a.variant.edition !== b.variant.edition) {
             return { reason: `Rejected: Phone edition mismatch — ${a.variant.edition} ≠ ${b.variant.edition}` };
         }
     }
-    // One has edition, one does not → also a mismatch (e.g. iPhone 15 vs iPhone 15 Pro)
     if ((a.variant.edition !== null) !== (b.variant.edition !== null)) {
         const edA = a.variant.edition || 'base';
         const edB = b.variant.edition || 'base';
@@ -655,28 +608,17 @@ function applyHardRejections(a, b, category) {
         }
     }
 
-    // Rule 7: Contradictory capacity (ml) for grocery/beauty
-    // NOTE: skip hard-reject if the values differ by more than a 2x ratio — that's a quantity difference,
-    // which should be classified as unit_price_only rather than rejected outright.
+    // Rule 7: Contradictory capacity
     if (category === 'grocery_beauty' && a.variant.capacityMl !== null && b.variant.capacityMl !== null) {
         const diff = Math.abs(a.variant.capacityMl - b.variant.capacityMl);
         const smaller = Math.min(a.variant.capacityMl, b.variant.capacityMl);
         const ratio = diff / smaller;
-        // Only hard-reject if they differ but the ratio is NOT a clean integer multiple
-        // (e.g. 650ml vs 700ml is a genuine mismatch; 1000ml vs 2000ml is 2x — a quantity difference)
         if (diff > 10 && ratio < 0.1) {
-            // Less than 10% difference but non-trivially different — genuine mismatch
             return { reason: `Rejected: Capacity mismatch — ${a.variant.capacityMl} ml ≠ ${b.variant.capacityMl} ml` };
-        } else if (diff > 10 && ratio > 0.1 && ratio < 0.9) {
-            // e.g. 200ml vs 400ml — likely size variants, not hard-reject
-            // Fall through to unit_price_only scoring
-        } else if (diff <= 10) {
-            // Same capacity within rounding tolerance — fine
         }
-        // For all other cases (2x, 3x etc.) — let unit_price_only handle it
     }
 
-    // Rule 8: Contradictory weight (g) for grocery/beauty
+    // Rule 8: Contradictory weight
     if (category === 'grocery_beauty' && a.variant.weightG !== null && b.variant.weightG !== null) {
         const diff = Math.abs(a.variant.weightG - b.variant.weightG);
         const smaller = Math.min(a.variant.weightG, b.variant.weightG);
@@ -684,10 +626,9 @@ function applyHardRejections(a, b, category) {
         if (diff > 10 && ratio < 0.1) {
             return { reason: `Rejected: Weight mismatch — ${a.variant.weightG} g ≠ ${b.variant.weightG} g` };
         }
-        // For larger differences (2x, 3x etc.) — let unit_price_only handle it
     }
 
-    return null; // No hard rejection
+    return null;
 }
 
 // ===========================================================================
@@ -695,21 +636,14 @@ function applyHardRejections(a, b, category) {
 // ===========================================================================
 
 const WEIGHTS = {
-    modelNumber:    0.22,   // Exact model-number string match (very strong signal)
-    model:          0.28,   // Normalised model string match (primary for consumer goods)
+    modelNumber:    0.22,
+    model:          0.28,
     brand:          0.15,
     productType:    0.10,
     criticalVariant: 0.15,
     titleSimilarity: 0.10
 };
 
-/**
- * Scores two normalised products and returns a transparent result object.
- *
- * @param {Object} a  Normalised product A (the "reference" from scrape A)
- * @param {Object} b  Normalised product B (candidate from another store)
- * @returns {Object} Match result with matchStatus, confidence, reasons, etc.
- */
 function matchProducts(a, b) {
     if (!a || !b) {
         return {
@@ -722,10 +656,7 @@ function matchProducts(a, b) {
         };
     }
 
-    const categoryA = classifyCategory(a);
-    const categoryB = classifyCategory(b);
-    const category = categoryA; // use A as the reference category
-
+    const category = classifyCategory(a);
     const matchedAttributes = [];
     const differingAttributes = [];
     const rejectedAttributes = [];
@@ -747,15 +678,10 @@ function matchProducts(a, b) {
     // ---- Positive scoring ----
     let score = 0;
 
-    // Model number — when both have extractable model numbers, this is the strongest signal.
-    // When neither has a model number (consumer goods like shampoo, detergent), redistribute
-    // the modelNumber weight proportionally into model + criticalVariant so those products
-    // can still reach the exact_match threshold.
     const bothHaveModelNumber = a.modelNumber && b.modelNumber;
     const modelNumberWeight = bothHaveModelNumber ? WEIGHTS.modelNumber : 0;
     const modelWeight = bothHaveModelNumber ? WEIGHTS.model : WEIGHTS.model + WEIGHTS.modelNumber;
 
-    // Model number
     if (bothHaveModelNumber) {
         const normA = normaliseModelString(a.modelNumber);
         const normB = normaliseModelString(b.modelNumber);
@@ -766,7 +692,6 @@ function matchProducts(a, b) {
         }
     }
 
-    // Model string
     if (a.model && b.model) {
         const normA = normaliseModelString(a.model);
         const normB = normaliseModelString(b.model);
@@ -783,16 +708,14 @@ function matchProducts(a, b) {
         }
     }
 
-    // Brand
     if (a.brand && b.brand && a.brand === b.brand) {
         score += WEIGHTS.brand;
         matchedAttributes.push('brand');
         reasons.push(`Brand matches: ${a.brand}`);
     } else if (!a.brand || !b.brand) {
-        score += WEIGHTS.brand * 0.5; // partial credit when brand unknown
+        score += WEIGHTS.brand * 0.5;
     }
 
-    // Product type / form
     if (a.variant.productForm && b.variant.productForm && a.variant.productForm === b.variant.productForm) {
         score += WEIGHTS.productType;
         matchedAttributes.push('productType');
@@ -801,7 +724,6 @@ function matchProducts(a, b) {
         score += WEIGHTS.productType * 0.5;
     }
 
-    // Critical variant attributes
     let variantScore = 0;
     let variantChecked = 0;
 
@@ -831,17 +753,15 @@ function matchProducts(a, b) {
     if (variantChecked > 0) {
         score += WEIGHTS.criticalVariant * (variantScore / variantChecked);
     } else {
-        score += WEIGHTS.criticalVariant * 0.5; // neutral when no variant data
+        score += WEIGHTS.criticalVariant * 0.5;
     }
 
-    // Title token similarity
     const titleSim = tokenSimilarity(a.normalizedTitle, b.normalizedTitle);
     score += WEIGHTS.titleSimilarity * titleSim;
     if (titleSim >= 0.7) {
         reasons.push(`Title similarity: ${Math.round(titleSim * 100)}%`);
     }
 
-    // ---- Determine color difference (allowed for variant_match) ----
     const colorDiffers = a.variant.color && b.variant.color && a.variant.color !== b.variant.color;
     if (colorDiffers) {
         differingAttributes.push('color');
@@ -851,8 +771,6 @@ function matchProducts(a, b) {
         reasons.push(`Colour matches: ${a.variant.color}`);
     }
 
-    // ---- Check for unit-price-only (same product line, different pack/quantity) ----
-    // Triggers when same brand + same form, OR same brand + same model line, have different net quantities
     const sameBrand = a.brand && b.brand && a.brand === b.brand;
     const sameForm = a.variant.productForm && b.variant.productForm
         && a.variant.productForm === b.variant.productForm;
@@ -868,7 +786,6 @@ function matchProducts(a, b) {
     const quantityDiffers = capacityDiffers || weightDiffers || packDiffers;
 
     if (sameProductLine && quantityDiffers) {
-        // Compute unit prices
         let unitPriceA = null, unitPriceB = null, unitLabel = null;
         if (a.variant.capacityMl && b.variant.capacityMl && a.price && b.price) {
             unitPriceA = Math.round(a.price / (a.variant.capacityMl / 1000) * 100) / 100;
@@ -896,7 +813,6 @@ function matchProducts(a, b) {
         };
     }
 
-    // ---- Determine final matchStatus ----
     const onlyColorDiffers = differingAttributes.length === 1 && differingAttributes[0] === 'color';
     const noConflicts = differingAttributes.length === 0 || onlyColorDiffers;
 
@@ -925,6 +841,121 @@ function matchProducts(a, b) {
 }
 
 /**
+ * Finds, classifies, and ranks similar product alternatives for a reference product.
+ * Returns distinct similar items (never exact matches) with human-readable differences.
+ *
+ * @param {Object} refProduct - Normalized reference product schema
+ * @param {Array<Object>} candidateProducts - List of normalized candidate products
+ * @returns {Array<Object>} Ranked similar products
+ */
+function findSimilarProducts(refProduct, candidateProducts = []) {
+    if (!refProduct || !Array.isArray(candidateProducts)) return [];
+
+    const similarList = [];
+
+    for (const cand of candidateProducts) {
+        if (!cand || cand.url === refProduct.url) continue;
+
+        const matchResult = matchProducts(refProduct, cand);
+
+        // Exact matches belong in exact platforms, not similar products
+        if (matchResult.matchStatus === 'exact_match') continue;
+
+        const differences = [];
+        let similarityTier = 'related_product';
+        let isRelevant = false;
+
+        const sameBrand = refProduct.brand && cand.brand && refProduct.brand === cand.brand;
+        const normRefModel = normaliseModelString(refProduct.model);
+        const normCandModel = normaliseModelString(cand.model);
+        const sameModel = normRefModel && normCandModel && normRefModel === normCandModel;
+        const partialModel = normRefModel && normCandModel && (normRefModel.includes(normCandModel) || normCandModel.includes(normRefModel));
+
+        // Detect specific differences
+        if (refProduct.variant.storageGb !== null && cand.variant.storageGb !== null &&
+            refProduct.variant.storageGb !== cand.variant.storageGb) {
+            differences.push(`Storage differs: ${cand.variant.storageGb}GB instead of ${refProduct.variant.storageGb}GB`);
+        }
+
+        if (refProduct.variant.ramGb !== null && cand.variant.ramGb !== null &&
+            refProduct.variant.ramGb !== cand.variant.ramGb) {
+            differences.push(`RAM differs: ${cand.variant.ramGb}GB instead of ${refProduct.variant.ramGb}GB`);
+        }
+
+        if (refProduct.variant.edition !== null && cand.variant.edition !== null &&
+            refProduct.variant.edition !== cand.variant.edition) {
+            differences.push(`Edition differs: ${cand.variant.edition} instead of ${refProduct.variant.edition}`);
+        }
+
+        if (refProduct.variant.capacityMl !== null && cand.variant.capacityMl !== null &&
+            Math.abs(refProduct.variant.capacityMl - cand.variant.capacityMl) > 10) {
+            differences.push(`Capacity differs: ${cand.variant.capacityMl}ml instead of ${refProduct.variant.capacityMl}ml`);
+        }
+
+        if (refProduct.variant.weightG !== null && cand.variant.weightG !== null &&
+            Math.abs(refProduct.variant.weightG - cand.variant.weightG) > 10) {
+            differences.push(`Weight differs: ${cand.variant.weightG}g instead of ${refProduct.variant.weightG}g`);
+        }
+
+        if (refProduct.variant.color && cand.variant.color &&
+            refProduct.variant.color !== cand.variant.color) {
+            differences.push(`Colour differs: ${cand.variant.color} instead of ${refProduct.variant.color}`);
+        }
+
+        if (refProduct.variant.packCount && cand.variant.packCount &&
+            refProduct.variant.packCount !== cand.variant.packCount) {
+            differences.push(`Pack size differs: Pack of ${cand.variant.packCount} instead of Pack of ${refProduct.variant.packCount}`);
+        }
+
+        if (!sameModel && partialModel) {
+            differences.push(`Different model line: ${cand.model || 'Alternative'} instead of ${refProduct.model || 'Reference'}`);
+        } else if (!sameBrand && cand.brand) {
+            differences.push(`Different brand: ${cand.brand.toUpperCase()} instead of ${refProduct.brand ? refProduct.brand.toUpperCase() : ''}`);
+        }
+
+        // Determine similarity tier
+        if (sameBrand && (sameModel || matchResult.matchStatus === 'variant_match' || matchResult.matchStatus === 'unit_price_only')) {
+            similarityTier = 'close_variant';
+            isRelevant = true;
+        } else if (sameBrand || (classifyCategory(refProduct) === classifyCategory(cand) && matchResult.confidence >= 0.40)) {
+            similarityTier = 'comparable_alternative';
+            isRelevant = true;
+        } else if (matchResult.confidence >= 0.35) {
+            similarityTier = 'related_product';
+            isRelevant = true;
+        }
+
+        if (isRelevant) {
+            const rawPlatform = cand._raw ? cand._raw.platform : (cand.source || 'Online Store');
+            const cleanTitleDisplay = cand.cleanTitle || cand.title || 'Similar Product';
+
+            similarList.push({
+                source: rawPlatform,
+                title: cleanTitleDisplay,
+                price: cand.price,
+                url: cand.url,
+                imageUrl: cand.imageUrl || '',
+                matchType: 'similar',
+                similarityTier,
+                confidence: Math.max(0.4, matchResult.confidence),
+                differences: differences.length > 0 ? differences : ['Alternative model in similar category'],
+                comparisonEligible: false
+            });
+        }
+    }
+
+    // Sort by similarity tier precedence and confidence
+    const tierPriority = { close_variant: 3, comparable_alternative: 2, related_product: 1 };
+    similarList.sort((a, b) => {
+        const pDiff = (tierPriority[b.similarityTier] || 0) - (tierPriority[a.similarityTier] || 0);
+        if (pDiff !== 0) return pDiff;
+        return b.confidence - a.confidence;
+    });
+
+    return similarList.slice(0, 10);
+}
+
+/**
  * Logs diagnostics for a normalised product safely (no credentials).
  */
 function logDiagnostics(normalised, matchResult) {
@@ -933,6 +964,7 @@ function logDiagnostics(normalised, matchResult) {
     console.log('[Matcher] Diagnostics:', JSON.stringify({
         source: normalised.source,
         originalTitle: (d.rawTitle || '').substring(0, 80),
+        cleanTitle: (d.cleanTitle || '').substring(0, 80),
         normalizedTitle: (d.normalizedTitle || '').substring(0, 80),
         brand: d.brand,
         model: d.model,
@@ -958,8 +990,8 @@ module.exports = {
     normalizeProduct,
     classifyCategory,
     matchProducts,
+    findSimilarProducts,
     logDiagnostics,
-    // Expose utilities for tests
     cleanTitle,
     extractBrand,
     extractStorage,

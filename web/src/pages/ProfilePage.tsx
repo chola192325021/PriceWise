@@ -69,9 +69,9 @@ const ProfilePage: React.FC = () => {
         <div className="md:col-span-1">
           <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700/70 flex flex-col items-center text-center transition-colors">
             <div className="relative mb-4">
-              {editedPhoto || user.profilePhoto ? (
+              {editedPhoto || user.profilePhoto || user.profilePhotoUrl || user.profile_photo ? (
                 <img
-                  src={editedPhoto || user.profilePhoto}
+                  src={editedPhoto || user.profilePhoto || user.profilePhotoUrl || user.profile_photo}
                   alt={user.name}
                   className="w-24 h-24 rounded-full object-cover border-4 border-blue-50 dark:border-slate-700"
                 />

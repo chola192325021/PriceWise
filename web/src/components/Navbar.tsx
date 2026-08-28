@@ -133,8 +133,8 @@ const Navbar: React.FC = () => {
                     Logout
                   </button>
                 </div>
-                {user.profilePhoto ? (
-                  <img src={user.profilePhoto} alt={user.name} className="w-10 h-10 rounded-full object-cover border-2 border-blue-50 dark:border-slate-700" />
+                {user.profilePhoto || user.profilePhotoUrl || user.profile_photo ? (
+                  <img src={user.profilePhoto || user.profilePhotoUrl || user.profile_photo} alt={user.name} className="w-10 h-10 rounded-full object-cover border-2 border-blue-50 dark:border-slate-700" />
                 ) : (
                   <div className="w-10 h-10 bg-blue-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 font-black">
                     {user.name.charAt(0)}

@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --bg-app: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border-subtle: #e2e8f0;
+  --border-default: #cbd5e1;
+  --brand-primary: #2563eb;
+  --brand-hover: #1d4ed8;
+  --brand-surface: #eff6ff;
+  --status-success-bg: #f0fdf4;
+  --status-success-text: #15803d;
+  --status-warning-bg: #fffbeb;
+  --status-warning-text: #b45309;
+  --status-error-bg: #fef2f2;
+  --status-error-text: #b91c1c;
+
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.dark {
+  --bg-app: #0f172a;
+  --bg-surface: #1e293b;
+  --bg-surface-elevated: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border-subtle: #334155;
+  --border-default: #475569;
+  --brand-primary: #3b82f6;
+  --brand-hover: #60a5fa;
+  --brand-surface: #1e3a8a;
+  --status-success-bg: #064e3b;
+  --status-success-text: #4ade80;
+  --status-warning-bg: #78350f;
+  --status-warning-text: #fde047;
+  --status-error-bg: #7f1d1d;
+  --status-error-text: #fca5a5;
+
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#root {
+  width: 100%;
+}
+
+/* Accessible focus ring styling */
+*:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}

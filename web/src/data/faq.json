@@ -1,0 +1,170 @@
+[
+  {
+    "id": "price-alerts",
+    "category": "Price Alerts",
+    "question": "How do I create a price-drop alert?",
+    "answer": "Open any product detail page, click or tap 'Set Alert', enter your target price in Rupees (₹), and click Save. PriceWise will monitor store prices continuously and notify you as soon as the price drops to or below your target.",
+    "keywords": ["alert", "price drop", "notify", "target price", "notification", "track price", "set alert"],
+    "aliases": ["how to get price notification", "alert when price falls", "how to set price drop alert", "how can I get notified when price falls"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "PRICE_ALERT_HELP", "label": "View Price Alerts" }
+    ],
+    "relatedFaqIds": ["alert-not-working", "watchlist-vs-alert"]
+  },
+  {
+    "id": "alert-not-working",
+    "category": "Price Alerts",
+    "question": "Why am I not receiving price alert notifications?",
+    "answer": "Make sure your target price is lower than the current lowest store price. Also verify that notifications are enabled in your device settings for PriceWise.",
+    "keywords": ["alert not working", "no notification", "alert trigger", "missing alert"],
+    "aliases": ["why no alert notification", "alerts not triggering"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "NOTIFICATIONS_SETTINGS", "label": "Check Settings" }
+    ],
+    "relatedFaqIds": ["price-alerts"]
+  },
+  {
+    "id": "watchlist-vs-alert",
+    "category": "Price Alerts",
+    "question": "What is the difference between Watchlist and Price Alerts?",
+    "answer": "Watchlist allows you to save and monitor favorite products in one place. Price Alerts actively notify you when a product drops to a specific target price you specify.",
+    "keywords": ["watchlist", "difference", "favorite", "save product"],
+    "aliases": ["what is watchlist", "how is watchlist different from alert"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "WATCHLIST", "label": "Go to Watchlist" }
+    ],
+    "relatedFaqIds": ["price-alerts"]
+  },
+  {
+    "id": "product-search",
+    "category": "Product Search",
+    "question": "How do I search for a product across stores?",
+    "answer": "Type any product name, brand, or model (e.g. 'iPhone 15', 'Sony Headphones') into the search bar at the top of the Home or Search screen. PriceWise queries Amazon, Flipkart, Meesho, Croma, and Reliance Digital simultaneously.",
+    "keywords": ["search", "find product", "query", "look up", "multi store"],
+    "aliases": ["how to search", "where do I search products", "compare store search"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "SEARCH", "label": "Open Search" }
+    ],
+    "relatedFaqIds": ["supported-stores", "paste-url"]
+  },
+  {
+    "id": "paste-url",
+    "category": "Product Search",
+    "question": "Can I search or track by pasting a product URL?",
+    "answer": "Yes! You can paste a direct product web link from Amazon or Flipkart into the URL tracker box to immediately scrape live prices and compare it across all stores.",
+    "keywords": ["paste url", "link", "amazon url", "flipkart link", "track url"],
+    "aliases": ["paste product link", "how to track by url"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "SEARCH", "label": "Paste URL" }
+    ],
+    "relatedFaqIds": ["product-search", "supported-stores"]
+  },
+  {
+    "id": "supported-stores",
+    "category": "Stores & Vendors",
+    "question": "Which stores and vendors does PriceWise support?",
+    "answer": "PriceWise currently tracks and compares live prices across 5 major Indian e-commerce stores: Amazon India, Flipkart, Meesho, Croma, and Reliance Digital.",
+    "keywords": ["stores", "vendors", "amazon", "flipkart", "meesho", "croma", "reliance digital", "supported apps"],
+    "aliases": ["which apps are tracked", "supported shopping sites", "where do prices come from"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "SEARCH", "label": "Compare Stores Now" }
+    ],
+    "relatedFaqIds": ["smart-deal", "store-link-fail"]
+  },
+  {
+    "id": "smart-deal",
+    "category": "Stores & Vendors",
+    "question": "What is a 'Smart Deal'?",
+    "answer": "A 'Smart Deal' is automatically highlighted by PriceWise on the store option that currently offers the lowest verified price for a product.",
+    "keywords": ["smart deal", "cheapest", "best price", "lowest price", "badge"],
+    "aliases": ["what does smart deal mean", "how is smart deal calculated"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "HOME", "label": "Browse Smart Deals" }
+    ],
+    "relatedFaqIds": ["supported-stores"]
+  },
+  {
+    "id": "store-link-fail",
+    "category": "Stores & Vendors",
+    "question": "Why does a product link open in the browser instead of the store app?",
+    "answer": "If the official store app (e.g. Flipkart or Meesho) is not installed on your Android device, PriceWise automatically opens the official store product page in your web browser.",
+    "keywords": ["browser", "app open", "flipkart app", "amazon app", "link error", "fallback"],
+    "aliases": ["why opens in web browser", "store app not opening"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "SUPPORT", "label": "Contact Support" }
+    ],
+    "relatedFaqIds": ["supported-stores"]
+  },
+  {
+    "id": "chronos-forecast",
+    "category": "Price Predictions",
+    "question": "How does the Amazon Chronos AI Price Forecast work?",
+    "answer": "PriceWise uses Amazon Chronos, a pretrained zero-shot time-series forecasting model, to analyze past daily price observations and project a 14-day expected price trajectory with lower and upper confidence bands.",
+    "keywords": ["chronos", "forecast", "prediction", "ai price", "time series", "trend", "future price"],
+    "aliases": ["how does price prediction work", "what is chronos forecast", "is price prediction accurate"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "HOME", "label": "Explore Predictions" }
+    ],
+    "relatedFaqIds": ["forecast-disclaimer"]
+  },
+  {
+    "id": "forecast-disclaimer",
+    "category": "Price Predictions",
+    "question": "Are Chronos price predictions guaranteed?",
+    "answer": "No. Forecasts are probabilistic estimates generated from historical price trends. They are designed to help you decide whether to buy now or wait, but prices are subject to seller changes.",
+    "keywords": ["guarantee", "disclaimer", "estimate", "accurate", "reliable"],
+    "aliases": ["are predictions guaranteed", "can price change from forecast"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "HOME", "label": "View Forecasts" }
+    ],
+    "relatedFaqIds": ["chronos-forecast"]
+  },
+  {
+    "id": "account-login",
+    "category": "Account & Login",
+    "question": "How do I log in or create an account?",
+    "answer": "Click or tap 'Login' or 'Sign Up' in the menu, enter your email address and password, and submit. An account allows you to sync price alerts and watchlist across devices.",
+    "keywords": ["login", "signup", "register", "create account", "sync"],
+    "aliases": ["how to login", "how to sign up", "create new account"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "LOGIN", "label": "Go to Login" }
+    ],
+    "relatedFaqIds": ["forgot-password"]
+  },
+  {
+    "id": "forgot-password",
+    "category": "Account & Login",
+    "question": "How do I reset my password?",
+    "answer": "On the Login screen, select 'Forgot Password?'. Enter your registered email address, and a password reset link will be sent to your inbox.",
+    "keywords": ["reset password", "forgot password", "password change", "recover account"],
+    "aliases": ["how to reset password", "forgot my password"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "FORGOT_PASSWORD", "label": "Reset Password" }
+    ],
+    "relatedFaqIds": ["account-login"]
+  },
+  {
+    "id": "app-origin",
+    "category": "Support & About",
+    "question": "Who developed PriceWise?",
+    "answer": "PriceWise was engineered and developed by Chola as a high-performance cross-platform price comparison, tracking, and time-series forecasting system.",
+    "keywords": ["chola", "developer", "about", "who made pricewise", "origin"],
+    "aliases": ["who created pricewise", "who is the developer"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "SUPPORT", "label": "About PriceWise" }
+    ],
+    "relatedFaqIds": ["contact-support"]
+  },
+  {
+    "id": "contact-support",
+    "category": "Support & About",
+    "question": "How can I contact PriceWise customer support?",
+    "answer": "You can reach our support team by emailing support@pricewise.ai or using the Contact Support option in the Profile section.",
+    "keywords": ["support", "contact", "email", "help desk", "customer care"],
+    "aliases": ["how to contact support", "customer service email"],
+    "relatedActions": [
+      { "type": "INTERNAL_ROUTE", "route": "SUPPORT", "label": "Contact Support Team" }
+    ],
+    "relatedFaqIds": ["app-origin"]
+  }
+]

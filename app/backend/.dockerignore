@@ -1,0 +1,8 @@
+node_modules
+.git
+.env
+Dockerfile
+.dockerignore
+render-build.sh
+test_fk.js
+test_meesho.js

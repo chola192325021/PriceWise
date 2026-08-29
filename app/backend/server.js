@@ -1081,7 +1081,7 @@ app.get("/user/tracking", async (req, res) => {
 });
 
 // Single Product Details Endpoint by ID
-app.get("/products/:id", async (req, res) => {
+const handleGetProductById = async (req, res) => {
     const { id } = req.params;
     if (!id) return res.status(400).json({ status: "error", message: "Product ID required" });
 
@@ -1132,7 +1132,10 @@ app.get("/products/:id", async (req, res) => {
         console.error("Fetch product by ID error:", err);
         return res.status(500).json({ status: "error", message: "Failed to fetch product" });
     }
-});
+};
+
+app.get("/products/:id", handleGetProductById);
+app.get("/api/products/:id", handleGetProductById);
 
 app.post("/signup", async (req, res) => {
   try {

@@ -87,7 +87,13 @@ fun WatchlistScreen(
                     contentPadding = PaddingValues(bottom = 16.dp, top = 8.dp)
                 ) {
                     items(watchlistProducts) { product ->
-                        Box(modifier = Modifier.clickable { onProductClick(product.id) }) {
+                        Box(modifier = Modifier.clickable {
+                            android.util.Log.d(
+                                "PriceWiseWatchlist",
+                                "Opening detail: hasProductId=${!product.id.isNullOrBlank()}, id=${product.id}, title=${product.title}"
+                            )
+                            onProductClick(product.id)
+                        }) {
                             AiProductCard(product)
                         }
                     }

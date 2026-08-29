@@ -26,9 +26,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.ui.text.style.TextAlign
 import com.example.pricewise.ui.theme.PriceWisePrimary
 import com.pricewise.ai.model.Product
 import com.pricewise.ai.viewmodel.AuthViewModel
+import com.pricewise.ai.viewmodel.ProductDetailUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,26 +40,128 @@ fun ProductDetailScreen(
     onBackPressed: () -> Unit = {},
     onSetAlertClick: () -> Unit = {}
 ) {
-    val products by viewModel.products.collectAsState()
-    val searchResults by viewModel.searchResults.collectAsState()
-    val product = viewModel.getProductById(productId) ?: (products + searchResults).find { it.id == productId }
-
-    if (product == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-        }
-        return
+    LaunchedEffect(productId) {
+        android.util.Log.d("PriceWiseProductDetail", "Detail opened: hasProductId=${productId.isNotBlank()}, id=$productId")
+        viewModel.loadProductDetail(productId)
     }
 
-    val displayTitle = product.cleanTitle ?: product.title
-    val exactPlatforms = product.platforms.filter { (it.status ?: it.matchStatus) == "exact_match" && it.price > 0 }
-    val allPlatforms = product.platforms
-    val smartDeal = exactPlatforms.find { it.isSmartDeal } ?: exactPlatforms.firstOrNull() ?: allPlatforms.find { it.price > 0 } ?: allPlatforms.firstOrNull()
+    val detailStates by viewModel.productDetailState.collectAsState()
+    val uiState = detailStates[productId] ?: run {
+        val inMem = viewModel.getProductById(productId)
+        if (inMem != null) ProductDetailUiState.Success(inMem) else ProductDetailUiState.Loading
+    }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.onBackground,
-        topBar = {
+    when (uiState) {
+        is ProductDetailUiState.Loading -> {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                topBar = {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            titleContentColor = MaterialTheme.colorScheme.onBackground
+                        ),
+                        title = { Text("PriceWise", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
+                        navigationIcon = {
+                            IconButton(onClick = onBackPressed) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onBackground)
+                            }
+                        }
+                    )
+                }
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "Loading product details...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            return
+        }
+        is ProductDetailUiState.Error -> {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                topBar = {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            titleContentColor = MaterialTheme.colorScheme.onBackground
+                        ),
+                        title = { Text("PriceWise", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
+                        navigationIcon = {
+                            IconButton(onClick = onBackPressed) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onBackground)
+                            }
+                        }
+                    )
+                }
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = uiState.message,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedButton(onClick = onBackPressed) {
+                                Text("Go Back")
+                            }
+                            if (uiState.canRetry) {
+                                Button(onClick = { viewModel.loadProductDetail(productId, forceRefresh = true) }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Retry")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return
+        }
+        is ProductDetailUiState.Success -> {
+            val product = uiState.product
+            val displayTitle = product.cleanTitle ?: product.title
+            val exactPlatforms = product.platforms.filter { (it.status ?: it.matchStatus) == "exact_match" && it.price > 0 }
+            val allPlatforms = product.platforms
+            val smartDeal = exactPlatforms.find { it.isSmartDeal } ?: exactPlatforms.firstOrNull() ?: allPlatforms.find { it.price > 0 } ?: allPlatforms.firstOrNull()
+
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
@@ -279,6 +383,8 @@ fun ProductDetailScreen(
             }
 
             Spacer(modifier = Modifier.height(80.dp)) // Padding for bottom button
+        }
+    }
         }
     }
 }

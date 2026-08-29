@@ -1,14 +1,17 @@
 const axios = require("axios");
 
-const CHRONOS_SERVICE_URL = process.env.CHRONOS_SERVICE_URL || "http://127.0.0.1:5001";
+function getServiceUrl() {
+    return process.env.CHRONOS_SERVICE_URL || "http://127.0.0.1:5001";
+}
 const CHRONOS_TIMEOUT_MS = parseInt(process.env.CHRONOS_TIMEOUT_MS || "5000", 10);
 
 /**
  * Checks if the Python Chronos microservice is healthy and reachable.
  */
 async function checkChronosHealth() {
+    const serviceUrl = getServiceUrl();
     try {
-        const res = await axios.get(`${CHRONOS_SERVICE_URL}/health`, {
+        const res = await axios.get(`${serviceUrl}/health`, {
             timeout: 2500,
             headers: { "Accept": "application/json" }
         });
@@ -16,13 +19,13 @@ async function checkChronosHealth() {
             reachable: res.status === 200 && res.data?.status === "ok",
             model: res.data?.model || "amazon/chronos-bolt-tiny",
             chronosLoaded: res.data?.chronosLoaded ?? false,
-            url: CHRONOS_SERVICE_URL
+            url: serviceUrl
         };
     } catch (err) {
         return {
             reachable: false,
             error: err.code || err.message,
-            url: CHRONOS_SERVICE_URL
+            url: serviceUrl
         };
     }
 }
@@ -60,7 +63,8 @@ async function getChronosForecast({ productId, sourceId = 'Amazon', currency = '
     };
 
     try {
-        const response = await axios.post(`${CHRONOS_SERVICE_URL}/forecast`, payload, {
+        const serviceUrl = getServiceUrl();
+        const response = await axios.post(`${serviceUrl}/forecast`, payload, {
             timeout: CHRONOS_TIMEOUT_MS,
             headers: { "Content-Type": "application/json" }
         });
@@ -103,7 +107,8 @@ async function getChronosForecast({ productId, sourceId = 'Amazon', currency = '
 }
 
 module.exports = {
-    CHRONOS_SERVICE_URL,
+    get CHRONOS_SERVICE_URL() { return getServiceUrl(); },
+    getServiceUrl,
     checkChronosHealth,
     getChronosForecast
 };

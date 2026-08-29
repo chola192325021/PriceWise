@@ -267,8 +267,66 @@ class AuthViewModel : ViewModel() {
     }
 
     fun getProductById(id: String): Product? {
-        val all = _products.value + _searchResults.value + _watchlistProducts.value + defaultMockProducts
+        val all = _products.value + _searchResults.value + _userWatchlist.value + _watchlistProducts.value + defaultMockProducts
         return all.find { it.id == id || it.id.equals(id, ignoreCase = true) }
+    }
+
+    private val _productDetailState = MutableStateFlow<Map<String, ProductDetailUiState>>(emptyMap())
+    val productDetailState = _productDetailState.asStateFlow()
+
+    fun loadProductDetail(productId: String, forceRefresh: Boolean = false) {
+        if (productId.isBlank()) {
+            _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Error("This product information is missing or incomplete.", canRetry = false))
+            return
+        }
+
+        // Check if already in local cache
+        val cached = getProductById(productId)
+        if (cached != null && !forceRefresh) {
+            _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Success(cached))
+            Log.d("PriceWiseProductDetail", "Loaded product detail from local cache: id=$productId, title=${cached.title}")
+            return
+        }
+
+        viewModelScope.launch {
+            _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Loading)
+            Log.d("PriceWiseProductDetail", "Fetching product detail from API: id=$productId")
+            try {
+                val response = RetrofitInstance.api.getProductById(productId)
+                val isSuccess = response.isSuccessful
+                val httpCode = response.code()
+                val body = response.body()
+                Log.d("PriceWiseProductDetail", "Product detail API response: success=$isSuccess, code=$httpCode, hasBody=${body != null}")
+
+                if (isSuccess && body != null && body.status == "success") {
+                    val product = body.data
+                    _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Success(product))
+                    if (_products.value.none { it.id == product.id }) {
+                        _products.value = _products.value + product
+                    }
+                } else if (httpCode == 404) {
+                    _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Error("This product is no longer available.", canRetry = false))
+                } else {
+                    val fallback = getProductById(productId)
+                    if (fallback != null) {
+                        _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Success(fallback))
+                    } else {
+                        _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Error("Unable to load product details (HTTP $httpCode).", canRetry = true))
+                    }
+                }
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (e: Exception) {
+                Log.e("PriceWiseProductDetail", "Product detail fetch error: ${e.javaClass.simpleName}: ${e.message}")
+                val fallback = getProductById(productId)
+                if (fallback != null) {
+                    _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Success(fallback))
+                } else {
+                    val msg = if (!e.message.isNullOrBlank()) "Connection error: ${e.message}" else "Unable to load product details. Please check your connection and try again."
+                    _productDetailState.value = _productDetailState.value + (productId to ProductDetailUiState.Error(msg, canRetry = true))
+                }
+            }
+        }
     }
 
     private val _userAlerts = MutableStateFlow<List<UserAlertItem>>(emptyList())
@@ -297,7 +355,14 @@ class AuthViewModel : ViewModel() {
             try {
                 val res = RetrofitInstance.api.getUserWatchlist(userId)
                 if (res.isSuccessful && res.body()?.status == "success") {
-                    _userWatchlist.value = res.body()?.data ?: emptyList()
+                    val list = res.body()?.data ?: emptyList()
+                    _userWatchlist.value = list
+                    // Cache watchlist items into product detail states
+                    list.forEach { p ->
+                        if (_productDetailState.value[p.id] !is ProductDetailUiState.Success) {
+                            _productDetailState.value = _productDetailState.value + (p.id to ProductDetailUiState.Success(p))
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error fetching user watchlist", e)
@@ -672,3 +737,9 @@ data class SearchUiState(
     val hasSearched: Boolean = false,
     val lastSuccessfulQuery: String? = null
 )
+
+sealed interface ProductDetailUiState {
+    data object Loading : ProductDetailUiState
+    data class Success(val product: Product) : ProductDetailUiState
+    data class Error(val message: String, val canRetry: Boolean = true) : ProductDetailUiState
+}

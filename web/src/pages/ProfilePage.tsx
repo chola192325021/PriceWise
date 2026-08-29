@@ -1,10 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import apiClient from '../api/client';
 import { LogOut, Edit2, ShoppingBag, Moon, Sun, Monitor, CheckCircle, RefreshCw, Camera } from 'lucide-react';
 
 const ProfilePage: React.FC = () => {
-  const { user, logout, updateProfile, theme, setTheme } = useAuth();
+  const { user, logout, updateProfile, fetchUserProfile, theme, setTheme } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editedName, setEditedName] = useState(user?.name || '');
   const [editedEmail, setEditedEmail] = useState(user?.email || '');
@@ -14,6 +14,10 @@ const ProfilePage: React.FC = () => {
   const [amazonSynced, setAmazonSynced] = useState(false);
   const [flipkartSynced, setFlipkartSynced] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
 
   if (!user) return null;
 

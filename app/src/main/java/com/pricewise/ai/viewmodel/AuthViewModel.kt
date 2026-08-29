@@ -101,11 +101,105 @@ class AuthViewModel : ViewModel() {
     private val _products = MutableStateFlow<List<Product>>(defaultMockProducts)
     val products = _products.asStateFlow()
 
+    private val _searchUiState = MutableStateFlow(SearchUiState())
+    val searchUiState: StateFlow<SearchUiState> = _searchUiState.asStateFlow()
+
     private val _searchResults = MutableStateFlow<List<Product>>(emptyList())
     val searchResults = _searchResults.asStateFlow()
 
     private val _isSearching = MutableStateFlow(false)
     val isSearching = _isSearching.asStateFlow()
+
+    private var activeSearchJob: kotlinx.coroutines.Job? = null
+
+    fun updateSearchInput(newText: String) {
+        // UI-only update; NEVER triggers network/scraper search
+        _searchUiState.value = _searchUiState.value.copy(inputText = newText)
+    }
+
+    fun clearSearchInput() {
+        _searchUiState.value = _searchUiState.value.copy(inputText = "")
+    }
+
+    fun submitSearch(query: String, cause: String = "USER_SUBMIT", forceRefresh: Boolean = false) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            return
+        }
+
+        val validCauses = setOf("USER_SUBMIT", "USER_REFRESH", "USER_RETRY")
+        val safeCause = if (validCauses.contains(cause)) cause else "USER_SUBMIT"
+
+        // Duplicate protection: if already loaded and identical query without force refresh, reuse results
+        val currentState = _searchUiState.value
+        if (!forceRefresh && safeCause != "USER_REFRESH" &&
+            currentState.lastSuccessfulQuery.equals(normalizedQuery, ignoreCase = true) &&
+            currentState.results.isNotEmpty()
+        ) {
+            _searchUiState.value = currentState.copy(
+                inputText = normalizedQuery,
+                submittedQuery = normalizedQuery,
+                hasSearched = true,
+                isLoading = false,
+                error = null
+            )
+            return
+        }
+
+        // Prevent duplicate concurrent requests for the exact same query
+        if (currentState.isLoading && currentState.submittedQuery.equals(normalizedQuery, ignoreCase = true) && !forceRefresh) {
+            return
+        }
+
+        Log.d("PriceWiseSearch", "Search request started: cause=$safeCause queryLength=${normalizedQuery.length}")
+
+        activeSearchJob?.cancel()
+        activeSearchJob = viewModelScope.launch {
+            _isSearching.value = true
+            _searchUiState.value = _searchUiState.value.copy(
+                inputText = normalizedQuery,
+                submittedQuery = normalizedQuery,
+                isLoading = true,
+                error = null,
+                hasSearched = true
+            )
+
+            try {
+                val response = RetrofitInstance.api.searchLive(normalizedQuery)
+                if (response.isSuccessful && response.body() != null) {
+                    val items = response.body()!!.data ?: emptyList()
+                    _searchResults.value = items
+                    _searchUiState.value = _searchUiState.value.copy(
+                        results = items,
+                        isLoading = false,
+                        error = null,
+                        hasSearched = true,
+                        lastSuccessfulQuery = normalizedQuery
+                    )
+                } else {
+                    _searchResults.value = emptyList()
+                    _searchUiState.value = _searchUiState.value.copy(
+                        results = emptyList(),
+                        isLoading = false,
+                        error = null,
+                        hasSearched = true,
+                        lastSuccessfulQuery = normalizedQuery
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error fetching search results", e)
+                _searchResults.value = emptyList()
+                _searchUiState.value = _searchUiState.value.copy(
+                    results = emptyList(),
+                    isLoading = false,
+                    error = "Failed to fetch live prices. Please retry.",
+                    hasSearched = true
+                )
+            } finally {
+                _isSearching.value = false
+            }
+        }
+    }
 
     private val _isAmazonSynced = MutableStateFlow(false)
     val isAmazonSynced = _isAmazonSynced.asStateFlow()
@@ -152,32 +246,22 @@ class AuthViewModel : ViewModel() {
     }
 
     fun fetchProducts(query: String = "", category: String? = null, source: String? = null) {
+        if (query.isNotEmpty()) {
+            submitSearch(query, cause = "USER_SUBMIT")
+            return
+        }
         viewModelScope.launch {
-            if (query.isNotEmpty()) {
-                _isSearching.value = true
-            }
             try {
-                val response = if (query.isEmpty()) {
-                    RetrofitInstance.api.getProducts()
-                } else {
-                    RetrofitInstance.api.searchLive(query, category, source)
-                }
-                
+                val response = RetrofitInstance.api.getProducts()
                 if (response.isSuccessful && response.body() != null) {
                     val items = response.body()!!.data
-                    if (query.isNotEmpty()) {
-                        _searchResults.value = items ?: emptyList()
-                    } else {
-                        _products.value = items ?: emptyList()
-                    }
+                    _products.value = items ?: emptyList()
                 } else {
-                    handleFallbackProducts(query)
+                    handleFallbackProducts("")
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error fetching products", e)
-                handleFallbackProducts(query)
-            } finally {
-                _isSearching.value = false
+                handleFallbackProducts("")
             }
         }
     }
@@ -567,3 +651,13 @@ sealed class SignUpState {
     data class Success(val data: SignUpResponse) : SignUpState()
     data class Error(val message: String) : SignUpState()
 }
+
+data class SearchUiState(
+    val inputText: String = "",
+    val submittedQuery: String? = null,
+    val results: List<Product> = emptyList(),
+    val isLoading: Boolean = false,
+    val error: String? = null,
+    val hasSearched: Boolean = false,
+    val lastSuccessfulQuery: String? = null
+)

@@ -26,6 +26,8 @@ data class User(
     val profilePhotoUrl: String? = null,
     @SerializedName("profile_photo")
     val profile_photo: String? = null,
+    @SerializedName("photoVersion")
+    val photoVersion: String? = null,
     @SerializedName("memberSince")
     val memberSince: String?,
     @SerializedName("watchlist")
@@ -34,10 +36,15 @@ data class User(
     val alerts: List<AlertItem>? = emptyList()
 ) {
     val photoUrl: String
-        get() = profilePhotoUrl?.takeIf { it.isNotBlank() }
-            ?: profilePhoto?.takeIf { it.isNotBlank() }
-            ?: profile_photo?.takeIf { it.isNotBlank() }
-            ?: ""
+        get() {
+            val base = profilePhotoUrl?.takeIf { it.isNotBlank() }
+                ?: profilePhoto?.takeIf { it.isNotBlank() }
+                ?: profile_photo?.takeIf { it.isNotBlank() }
+                ?: return ""
+            if (photoVersion.isNullOrBlank()) return base
+            val separator = if (base.contains("?")) "&" else "?"
+            return "$base${separator}v=$photoVersion"
+        }
 }
 
 data class AlertItem(

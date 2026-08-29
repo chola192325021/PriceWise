@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Mail, Lock, User as UserIcon, AlertCircle, ShoppingCart, Loader2 } from 'lucide-react';
+import { Mail, User as UserIcon, AlertCircle, ShoppingCart } from 'lucide-react';
+import PasswordField from '../components/PasswordField';
 
 const SignupPage: React.FC = () => {
   const [name, setName] = useState('');
@@ -82,18 +83,16 @@ const SignupPage: React.FC = () => {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">Password</label>
-            <div className="relative">
-              <input
-                type="password"
-                required
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-sm"
-                placeholder="Min. 8 characters"
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <Lock className="absolute left-3 top-3.5 text-slate-400 dark:text-slate-500 w-5 h-5" />
-            </div>
+            <PasswordField
+              id="signup-password"
+              name="password"
+              required
+              placeholder="Min. 8 characters"
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+            />
           </div>
 
           <button

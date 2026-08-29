@@ -48,7 +48,42 @@ const generatePredictionAsync = async (productDoc, currentMinPrice, platforms = 
     }
 };
 
+const normalizeUserResponse = (user) => {
+    if (!user) return null;
+    const photo = user.profile_photo || user.profilePhoto || user.profilePhotoUrl || "";
+    const photoVersion = user.updated_at ? String(new Date(user.updated_at).getTime()) : (user.photoVersion ? String(user.photoVersion) : String(Date.now()));
+    return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        profilePhoto: photo,
+        profilePhotoUrl: photo,
+        profile_photo: photo,
+        photoVersion: photoVersion,
+        memberSince: user.member_since || user.memberSince || "Member since 2024",
+        watchlist: user.watchlist || [],
+        alerts: user.alerts || []
+    };
+};
+
 app.get("/", (req, res) => res.send("PriceWise Engine Running with Supabase Support"));
+
+app.get("/user/profile", async (req, res) => {
+    try {
+        const userId = req.query.userId || req.query.id;
+        if (!userId) {
+            return res.status(400).json({ status: "error", message: "User ID is required" });
+        }
+        const { data: user, error } = await supabase.from('users').select('*').eq('id', userId).single();
+        if (error || !user) {
+            return res.status(404).json({ status: "error", message: "User not found" });
+        }
+        res.json({ status: "success", user: normalizeUserResponse(user) });
+    } catch (error) {
+        console.error("Fetch user profile error:", error);
+        res.status(500).json({ status: "error", message: "Failed to fetch user profile" });
+    }
+});
 
 
 
@@ -1118,7 +1153,7 @@ app.post("/signup", async (req, res) => {
     if (error) throw error;
 
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ status: "success", token, user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profile_photo, memberSince: user.member_since } });
+    res.status(201).json({ status: "success", token, user: normalizeUserResponse(user) });
   } catch (error) {
     console.error("Signup error:", error);
     res.status(500).json({ status: "error" });
@@ -1311,15 +1346,7 @@ app.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ status: "success", token, user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        profilePhoto: user.profile_photo,
-        memberSince: user.member_since,
-        watchlist: user.watchlist || [],
-        alerts: user.alerts || []
-    }});
+    res.json({ status: "success", token, user: normalizeUserResponse(user) });
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ status: "error" });
@@ -1328,21 +1355,29 @@ app.post("/login", async (req, res) => {
 
 app.put("/user/update", async (req, res) => {
   try {
-    const { id, name, email, profilePhoto } = req.body;
-    const { data: user, error } = await supabase.from('users').update({ name, email, profile_photo: profilePhoto }).eq('id', id).select().single();
+    const { id, name, email, profilePhoto, profilePhotoUrl, profile_photo } = req.body;
+    const photoToSave = profilePhotoUrl || profilePhoto || profile_photo;
+    const updatePayload = {};
+    if (name !== undefined) updatePayload.name = name;
+    if (email !== undefined) updatePayload.email = email;
+    if (photoToSave !== undefined) updatePayload.profile_photo = photoToSave;
+
+    const { data: user, error } = await supabase.from('users').update(updatePayload).eq('id', id).select().single();
     if (error) throw error;
-    res.json({ status: "success", user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profile_photo, memberSince: user.member_since, watchlist: user.watchlist, alerts: user.alerts } });
-  } catch (error) { res.status(500).json({ status: "error" }); }
+    res.json({ status: "success", user: normalizeUserResponse(user) });
+  } catch (error) {
+    console.error("Update user error:", error);
+    res.status(500).json({ status: "error" });
+  }
 });
 
 app.post("/user/watchlist/add", async (req, res) => {
     try {
         const { userId, productId } = req.body;
-        // Fetch current watchlist
         const { data: user } = await supabase.from('users').select('watchlist').eq('id', userId).single();
-        const newWatchlist = [...new Set([...(user.watchlist || []), productId])];
+        const newWatchlist = [...new Set([...(user?.watchlist || []), productId])];
         const { data: updatedUser } = await supabase.from('users').update({ watchlist: newWatchlist }).eq('id', userId).select().single();
-        res.json({ status: "success", user: { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name, profilePhoto: updatedUser.profile_photo, memberSince: updatedUser.member_since, watchlist: updatedUser.watchlist, alerts: updatedUser.alerts } });
+        res.json({ status: "success", user: normalizeUserResponse(updatedUser) });
     } catch (error) { res.status(500).json({ status: "error" }); }
 });
 
@@ -1350,9 +1385,9 @@ app.post("/user/watchlist/remove", async (req, res) => {
     try {
         const { userId, productId } = req.body;
         const { data: user } = await supabase.from('users').select('watchlist').eq('id', userId).single();
-        const newWatchlist = (user.watchlist || []).filter(id => id !== productId);
+        const newWatchlist = (user?.watchlist || []).filter(id => id !== productId);
         const { data: updatedUser } = await supabase.from('users').update({ watchlist: newWatchlist }).eq('id', userId).select().single();
-        res.json({ status: "success", user: { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name, profilePhoto: updatedUser.profile_photo, memberSince: updatedUser.member_since, watchlist: updatedUser.watchlist, alerts: updatedUser.alerts } });
+        res.json({ status: "success", user: normalizeUserResponse(updatedUser) });
     } catch (error) { res.status(500).json({ status: "error" }); }
 });
 
@@ -1372,26 +1407,18 @@ app.post("/user/alerts/set", async (req, res) => {
         
         res.json({
             status: "success",
-            user: {
-                id: updatedUser?.id || userId || "user_123",
-                email: updatedUser?.email || "user@example.com",
-                name: updatedUser?.name || "Shopper",
-                profilePhoto: updatedUser?.profile_photo || "",
-                memberSince: updatedUser?.member_since || "Member since today",
-                watchlist: updatedUser?.watchlist || [],
-                alerts: updatedUser?.alerts || newAlerts
-            }
+            user: normalizeUserResponse(updatedUser || { id: userId, alerts: newAlerts })
         });
     } catch (error) { 
         console.error("Alerts set error:", error);
         res.json({
             status: "success",
-            user: {
+            user: normalizeUserResponse({
                 id: req.body.userId || "user_123",
                 email: "user@example.com",
                 name: "Shopper",
                 alerts: [{ productId: req.body.productId, targetPrice: parseFloat(req.body.targetPrice || 0) }]
-            }
+            })
         }); 
     }
 });
@@ -1411,15 +1438,7 @@ app.post("/user/alerts/remove", async (req, res) => {
         
         res.json({
             status: "success",
-            user: {
-                id: updatedUser?.id || userId || "user_123",
-                email: updatedUser?.email || "user@example.com",
-                name: updatedUser?.name || "Shopper",
-                profilePhoto: updatedUser?.profile_photo || "",
-                memberSince: updatedUser?.member_since || "Member since today",
-                watchlist: updatedUser?.watchlist || [],
-                alerts: updatedUser?.alerts || newAlerts
-            }
+            user: normalizeUserResponse(updatedUser || { id: userId, alerts: newAlerts })
         });
     } catch (error) { 
         console.error("Alerts remove error:", error);

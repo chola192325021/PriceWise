@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import apiClient from '../api/client';
 import { Product, ProductListResponse } from '../types';
 import { useAuth } from '../context/AuthContext';
+import searchStore from '../utils/searchStore';
 import {
   TrendingUp,
   ArrowDown,
@@ -14,7 +15,8 @@ import {
   Laptop,
   Shirt,
   Home as HomeIcon,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
@@ -27,6 +29,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   return (
     <Link
       to={`/product/${product._id}`}
+      onClick={() => searchStore.saveScroll(window.scrollY)}
       className="bg-white dark:bg-slate-800 rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col group border border-slate-100 dark:border-slate-700/70"
     >
       <div className="relative h-48 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center p-4">
@@ -132,10 +135,33 @@ const CategoryRow: React.FC<{
 const HomePage: React.FC = () => {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const rawQuery = searchParams.get('search');
+  const query = rawQuery ? rawQuery.trim() : '';
+
+  const [products, setProducts] = useState<Product[]>(() => {
+    if (query) {
+      const cached = searchStore.getCachedResults(query);
+      if (cached && cached.length > 0) return cached;
+    }
+    const state = searchStore.getState();
+    if (!query && state.results.length > 0 && !state.submittedQuery) {
+      return state.results;
+    }
+    return [];
+  });
+
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (query) {
+      const cached = searchStore.getCachedResults(query);
+      return !cached;
+    }
+    const state = searchStore.getState();
+    return !(state.results.length > 0 && !state.submittedQuery);
+  });
+
   const [error, setError] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const activeSearchQueryRef = useRef<string | null>(query || null);
 
   // Track product modal state
   const [showTrackModal, setShowTrackModal] = useState(false);
@@ -144,17 +170,38 @@ const HomePage: React.FC = () => {
   const [tracking, setTracking] = useState(false);
   const [trackMsg, setTrackMsg] = useState('');
 
-  const query = searchParams.get('search');
-
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (cause: 'USER_SUBMIT' | 'USER_REFRESH' | 'USER_RETRY' = 'USER_SUBMIT') => {
     setLoading(true);
     setError('');
+    const cacheHit = Boolean(query && searchStore.getCachedResults(query) && cause !== 'USER_REFRESH');
+    searchStore.logSearchEvent(cause, query, cacheHit);
+
     try {
       const categoryParam = selectedCategory !== 'All' ? `&category=${encodeURIComponent(selectedCategory)}` : '';
       const endpoint = query ? `/products/search-live?query=${encodeURIComponent(query)}${categoryParam}` : '/products';
       const response = await apiClient.get<ProductListResponse>(endpoint);
       if (response.data.status === 'success') {
-        setProducts(response.data.data);
+        const data = response.data.data || [];
+        setProducts(data);
+        if (query) {
+          searchStore.setCachedResults(query, data);
+          searchStore.setState({
+            submittedQuery: query,
+            results: data,
+            hasSearched: true,
+            lastSuccessfulQuery: query,
+            isLoading: false,
+            error: null
+          });
+        } else {
+          searchStore.setState({
+            submittedQuery: null,
+            results: data,
+            hasSearched: false,
+            isLoading: false,
+            error: null
+          });
+        }
       }
     } catch (err) {
       setError('Failed to load products. Please try again later.');
@@ -165,8 +212,38 @@ const HomePage: React.FC = () => {
   }, [query, selectedCategory]);
 
   useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
+    if (query) {
+      const cached = searchStore.getCachedResults(query);
+      if (cached) {
+        setProducts(cached);
+        setLoading(false);
+        const savedScroll = searchStore.getSavedScroll();
+        if (savedScroll > 0) {
+          setTimeout(() => {
+            window.scrollTo({ top: savedScroll, behavior: 'instant' });
+          }, 30);
+        }
+        return;
+      }
+      activeSearchQueryRef.current = query;
+      fetchProducts('USER_SUBMIT');
+    } else {
+      activeSearchQueryRef.current = '';
+      const state = searchStore.getState();
+      if (state.results.length > 0 && !state.submittedQuery && selectedCategory === 'All') {
+        setProducts(state.results);
+        setLoading(false);
+        const savedScroll = searchStore.getSavedScroll();
+        if (savedScroll > 0) {
+          setTimeout(() => {
+            window.scrollTo({ top: savedScroll, behavior: 'instant' });
+          }, 30);
+        }
+      } else {
+        fetchProducts('USER_SUBMIT');
+      }
+    }
+  }, [query, selectedCategory, fetchProducts]);
 
   const handleTrackSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,7 +264,7 @@ const HomePage: React.FC = () => {
         setTimeout(() => {
           setShowTrackModal(false);
           setTrackMsg('');
-          fetchProducts();
+          fetchProducts('USER_REFRESH');
         }, 1500);
       } else {
         setTrackMsg('Track request sent. Live data updating.');
@@ -211,9 +288,20 @@ const HomePage: React.FC = () => {
           <h1 className="text-3xl font-black text-slate-900 dark:text-slate-100">
             {query ? `Search results for "${query}"` : `Hello, ${user?.name || 'Shopper'}!`}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm">
-            {query ? 'Real-time multi-source comparison (Amazon, Flipkart, Meesho, AJIO, Myntra)' : 'Real-time price comparisons and AI drop predictions.'}
-          </p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
+              {query ? 'Real-time multi-source comparison (Amazon, Flipkart, Meesho, AJIO, Myntra)' : 'Real-time price comparisons and AI drop predictions.'}
+            </p>
+            {query && !loading && (
+              <button
+                onClick={() => fetchProducts('USER_REFRESH')}
+                title="Refresh live prices"
+                className="inline-flex items-center text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+              </button>
+            )}
+          </div>
         </div>
 
         <button
@@ -238,7 +326,7 @@ const HomePage: React.FC = () => {
       ) : error ? (
         <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-xl p-8 text-center">
           <p className="text-red-600 dark:text-red-400 font-medium">{error}</p>
-          <button onClick={() => fetchProducts()} className="mt-4 text-blue-600 dark:text-blue-400 font-bold hover:underline">
+          <button onClick={() => fetchProducts('USER_RETRY')} className="mt-4 text-blue-600 dark:text-blue-400 font-bold hover:underline">
             Try Again
           </button>
         </div>
@@ -249,6 +337,14 @@ const HomePage: React.FC = () => {
           </div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">No products found</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-2">Try selecting another category or searching for a specific product.</p>
+          {query && (
+            <button
+              onClick={() => fetchProducts('USER_REFRESH')}
+              className="mt-4 inline-flex items-center px-4 py-2 bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-bold rounded-xl text-sm"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" /> Refresh Search
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

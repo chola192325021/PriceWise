@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Mail, Lock, AlertCircle, ShoppingCart, KeyRound, X, Loader2, CheckCircle2 } from 'lucide-react';
+import { Mail, AlertCircle, ShoppingCart, KeyRound, X, Loader2, CheckCircle2 } from 'lucide-react';
+import PasswordField from '../components/PasswordField';
 
 const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -149,17 +150,15 @@ const LoginPage: React.FC = () => {
                 Forgot Password?
               </button>
             </div>
-            <div className="relative">
-              <input
-                type="password"
-                required
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-sm"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <Lock className="absolute left-3 top-3.5 text-slate-400 dark:text-slate-500 w-5 h-5" />
-            </div>
+            <PasswordField
+              id="login-password"
+              name="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="current-password"
+            />
           </div>
 
           <button
@@ -281,18 +280,16 @@ const LoginPage: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
                     New Password
                   </label>
-                  <div className="relative">
-                    <input
-                      type="password"
-                      required
-                      minLength={8}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Min. 8 characters"
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    />
-                    <Lock className="absolute left-3 top-3.5 text-slate-400 dark:text-slate-500 w-5 h-5" />
-                  </div>
+                  <PasswordField
+                    id="reset-new-password"
+                    name="newPassword"
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Min. 8 characters"
+                    autoComplete="new-password"
+                  />
                 </div>
 
                 <div className="flex justify-between items-center text-xs px-1">

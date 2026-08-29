@@ -17,6 +17,7 @@ interface AuthContextType {
   resendPasswordResetCode: (email: string) => Promise<{ success: boolean; message: string; remainingSeconds?: number }>;
   resetPassword: (email: string, code: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   updateProfile: (name: string, email: string, profilePhoto: string) => Promise<void>;
+  fetchUserProfile: (userId?: string) => Promise<void>;
   addToWatchlist: (productId: string) => Promise<void>;
   removeFromWatchlist: (productId: string) => Promise<void>;
   setPriceAlert: (productId: string, targetPrice: number) => Promise<void>;
@@ -186,6 +187,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const fetchUserProfile = async (userId?: string) => {
+    const targetId = userId || user?.id;
+    if (!targetId) return;
+    try {
+      const response = await apiClient.get<LoginResponse>(`/user/profile?userId=${targetId}`);
+      if (response.data?.status === 'success' && response.data?.user) {
+        saveUserData(response.data.user);
+      }
+    } catch (e) {
+      console.error('Fetch profile error:', e);
+    }
+  };
+
   const addToWatchlist = async (productId: string) => {
     if (!user) return;
     try {
@@ -279,6 +293,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resendPasswordResetCode,
         resetPassword,
         updateProfile,
+        fetchUserProfile,
         addToWatchlist,
         removeFromWatchlist,
         setPriceAlert,

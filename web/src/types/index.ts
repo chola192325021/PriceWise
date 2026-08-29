@@ -11,8 +11,34 @@ export interface User {
 }
 
 export interface AlertItem {
+  id?: string;
+  _id?: string;
   productId: string;
+  product_id?: string;
   targetPrice: number;
+  target_price?: number;
+  currency?: string;
+  isActive?: boolean;
+  is_active?: boolean;
+  createdAt?: string;
+  created_at?: string;
+  lastCheckedAt?: string | null;
+  last_checked_at?: string | null;
+  lastObservedPrice?: number | null;
+  last_observed_price?: number | null;
+  triggeredAt?: string | null;
+  triggered_at?: string | null;
+  notificationSentAt?: string | null;
+  notification_sent_at?: string | null;
+  notificationStatus?: 'MONITORING' | 'TRIGGERED' | 'SENT' | 'FAILED';
+  notification_status?: 'MONITORING' | 'TRIGGERED' | 'SENT' | 'FAILED';
+  lastNotifiedPrice?: number | null;
+  last_notified_price?: number | null;
+  isMock?: boolean;
+  is_mock?: boolean;
+  mockType?: string | null;
+  mock_type?: string | null;
+  mockLabel?: string | null;
 }
 
 /** Structured match result for a platform listing vs. the reference listing. */
@@ -144,6 +170,10 @@ export interface Product {
   aiPrediction: AiPrediction;
   /** Structured comparison summary — tells UI how safe it is to compare prices */
   comparisonSummary?: ComparisonSummary;
+  isMock?: boolean;
+  is_mock?: boolean;
+  mockType?: string;
+  source?: string;
   query?: {
     title: string;
     cleanTitle?: string;
@@ -169,14 +199,54 @@ export interface SingleProductResponse {
 }
 
 export interface UserAlertItem {
+  id?: string;
   productId: string;
   targetPrice: number;
+  currency?: string;
+  isActive?: boolean;
+  notificationStatus?: 'MONITORING' | 'TRIGGERED' | 'SENT' | 'FAILED';
+  lastCheckedAt?: string | null;
+  lastObservedPrice?: number | null;
+  triggeredAt?: string | null;
+  notificationSentAt?: string | null;
+  lastNotifiedPrice?: number | null;
+  isMock?: boolean;
+  is_mock?: boolean;
+  mockType?: string | null;
+  mockLabel?: string | null;
+  alert?: AlertItem;
   product: Product;
 }
 
 export interface UserAlertsResponse {
   status: string;
   data: UserAlertItem[];
+}
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+  productId: string;
+  alertId?: string;
+  currentPrice: number;
+  targetPrice: number;
+  currency?: string;
+  platformName?: string;
+  productUrl?: string;
+  imageUrl?: string;
+  isMock?: boolean;
+  mockType?: string | null;
+  mockLabel?: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface NotificationsResponse {
+  status: string;
+  data: AppNotification[];
 }
 
 export interface ChatMessage {

@@ -15,7 +15,20 @@ data class SingleProductResponse(
 data class UserAlertItem(
     @SerializedName("productId") val productId: String,
     @SerializedName("targetPrice") val targetPrice: Double,
-    @SerializedName("product") val product: Product
+    @SerializedName("product") val product: Product,
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("currency") val currency: String? = "INR",
+    @SerializedName("isActive") val isActive: Boolean? = true,
+    @SerializedName("notificationStatus") val notificationStatus: String? = "MONITORING",
+    @SerializedName("lastCheckedAt") val lastCheckedAt: String? = null,
+    @SerializedName("lastObservedPrice") val lastObservedPrice: Double? = null,
+    @SerializedName("triggeredAt") val triggeredAt: String? = null,
+    @SerializedName("notificationSentAt") val notificationSentAt: String? = null,
+    @SerializedName("lastNotifiedPrice") val lastNotifiedPrice: Double? = null,
+    @SerializedName("isMock") val isMock: Boolean? = false,
+    @SerializedName("is_mock") val is_mock: Boolean? = false,
+    @SerializedName("mockType") val mockType: String? = null,
+    @SerializedName("mockLabel") val mockLabel: String? = null
 )
 
 data class UserAlertsResponse(
@@ -47,7 +60,11 @@ data class Product(
     @SerializedName("noExactMatchMessage") val noExactMatchMessage: String? = null,
     @SerializedName("aiPrediction") val aiPrediction: AiPrediction,
     /** Structured comparison summary — tells UI how trustworthy the price comparison is */
-    @SerializedName("comparisonSummary") val comparisonSummary: ComparisonSummary? = null
+    @SerializedName("comparisonSummary") val comparisonSummary: ComparisonSummary? = null,
+    @SerializedName("isMock") val isMock: Boolean? = false,
+    @SerializedName("is_mock") val is_mock: Boolean? = false,
+    @SerializedName("mockType") val mockType: String? = null,
+    @SerializedName("source") val source: String? = null
 )
 
 data class UrlValidation(

@@ -15,6 +15,7 @@ const matcher = require("./services/matcher");
 const productNormalizer = require("./services/productNormalizer");
 const productUrlValidator = require("./services/productUrlValidator");
 const nodemailer = require("nodemailer");
+const priceAlertService = require("./services/priceAlertService");
 
 const app = express();
 
@@ -253,6 +254,15 @@ app.post("/products/track", async (req, res) => {
             await supabase.from('users').update({ watchlist }).eq('id', userId);
         }
 
+        // Trigger alert evaluations for this newly tracked product
+        if (productData && minPrice > 0) {
+            priceAlertService.evaluateAllAlertsForProduct(productData.id, minPrice, {
+                name: sourcePlatformName,
+                url: url,
+                imageUrl: imageUrl
+            }).catch(evalErr => console.warn("[Track] Alert evaluation error:", evalErr.message));
+        }
+
         res.json({ status: "success", productId: productData?.id, message: "Product tracked and saved to watchlist!" });
     } catch (e) {
         console.error("Tracking error:", e);
@@ -325,6 +335,16 @@ app.post("/products/watchlist/refresh", async (req, res) => {
                     price_history: newHistory,
                     ai_prediction: newAiPrediction
                 }).eq('id', product.id);
+
+                // Trigger price alert evaluations for this refreshed product
+                if (newLowest > 0) {
+                    const bestPlatform = updatedPlatforms.find(p => p.price === newLowest) || updatedPlatforms[0];
+                    priceAlertService.evaluateAllAlertsForProduct(product.id, newLowest, {
+                        name: bestPlatform?.name || 'Online Store',
+                        url: bestPlatform?.url || '',
+                        imageUrl: product.image_url || ''
+                    }).catch(evalErr => console.warn(`[Refresh] Alert evaluation error for ${product.id}:`, evalErr.message));
+                }
 
                 updated++;
             } catch (err) {
@@ -892,70 +912,97 @@ app.get("/products/search-live", async (req, res) => {
     }
 });
 
+const staticMocks = [
+    {
+        _id: "mock_1",
+        id: "mock_1",
+        title: "Apple iPhone 15 (128 GB) - Blue",
+        brand: "Apple",
+        category: "Electronics",
+        imageUrl: "https://m.media-amazon.com/images/I/71d7rfSl0wL._SL1500_.jpg",
+        platforms: [
+            { name: "Flipkart", price: 69999, pricePrefix: "Starting from ", url: "https://www.flipkart.com", isSmartDeal: true },
+            { name: "Amazon", price: 71290, url: "https://www.amazon.in", isSmartDeal: false, pricePrefix: "" }
+        ],
+        aiPrediction: { trend: "drop", expectedPrice: 67500, recommendation: "Historic Low expected soon!", confidence: 92 }
+    },
+    {
+        _id: "mock_2",
+        id: "mock_2",
+        title: "Sony WH-1000XM5 Wireless Headphones",
+        brand: "Sony",
+        category: "Electronics",
+        imageUrl: "https://m.media-amazon.com/images/I/61+btxzpfDL._SL1500_.jpg",
+        platforms: [
+            { name: "Flipkart", price: 26990, pricePrefix: "Starting from ", url: "https://www.flipkart.com", isSmartDeal: true },
+            { name: "Amazon", price: 28990, url: "https://www.amazon.in", isSmartDeal: false, pricePrefix: "" }
+        ],
+        aiPrediction: { trend: "stable", expectedPrice: 26990, recommendation: "Price is stable on Flipkart.", confidence: 85 }
+    }
+];
+
+async function resolveProductById(pid) {
+    if (!pid) return null;
+    const strId = String(pid);
+    if (strId === priceAlertService.MOCK_ALERT_PRODUCT.id) {
+        return priceAlertService.MOCK_ALERT_PRODUCT;
+    }
+    let product = liveProductStore.get(strId);
+    if (!product) {
+        try {
+            const { data: dbP } = await supabase.from('products').select('*').eq('id', strId).single();
+            if (dbP) {
+                product = {
+                    _id: dbP.id,
+                    id: dbP.id,
+                    title: dbP.title,
+                    brand: dbP.brand || "Verified Deal",
+                    category: dbP.category || "General",
+                    imageUrl: dbP.image_url || "https://via.placeholder.com/300",
+                    platforms: dbP.platforms || [],
+                    aiPrediction: dbP.ai_prediction || { trend: 'drop', expectedPrice: 1000, recommendation: "Price alert active.", confidence: 85 }
+                };
+            }
+        } catch (e) {}
+    }
+    if (!product) {
+        product = staticMocks.find(m => m._id === strId || m.id === strId);
+    }
+    return product;
+}
+
 // GET /user/alerts?userId=...
 app.get("/user/alerts", async (req, res) => {
     try {
         const userId = req.query.userId || req.body?.userId;
         if (!userId) return res.status(400).json({ status: "error", message: "userId required" });
 
-        const { data: user } = await supabase.from('users').select('alerts').eq('id', userId).single();
+        const { data: user } = await supabase.from('users').select('*').eq('id', userId).single();
         const userAlerts = user?.alerts || [];
         if (userAlerts.length === 0) {
             return res.json({ status: "success", data: [] });
         }
 
-        const staticMocks = [
-            {
-                _id: "mock_1",
-                title: "Apple iPhone 15 (128 GB) - Blue",
-                brand: "Apple",
-                category: "Electronics",
-                imageUrl: "https://m.media-amazon.com/images/I/71d7rfSl0wL._SL1500_.jpg",
-                platforms: [
-                    { name: "Flipkart", price: 69999, pricePrefix: "Starting from ", url: "https://www.flipkart.com", isSmartDeal: true },
-                    { name: "Amazon", price: 71290, url: "https://www.amazon.in", isSmartDeal: false, pricePrefix: "" }
-                ],
-                aiPrediction: { trend: "drop", expectedPrice: 67500, recommendation: "Historic Low expected soon!", confidence: 92 }
-            },
-            {
-                _id: "mock_2",
-                title: "Sony WH-1000XM5 Wireless Headphones",
-                brand: "Sony",
-                category: "Electronics",
-                imageUrl: "https://m.media-amazon.com/images/I/61+btxzpfDL._SL1500_.jpg",
-                platforms: [
-                    { name: "Flipkart", price: 26990, pricePrefix: "Starting from ", url: "https://www.flipkart.com", isSmartDeal: true },
-                    { name: "Amazon", price: 28990, url: "https://www.amazon.in", isSmartDeal: false, pricePrefix: "" }
-                ],
-                aiPrediction: { trend: "stable", expectedPrice: 26990, recommendation: "Price is stable on Flipkart.", confidence: 85 }
-            }
-        ];
-
         const resolvedAlerts = [];
-        for (const alert of userAlerts) {
-            const pid = alert.productId;
-            let product = liveProductStore.get(pid);
-            if (!product) {
-                const { data: dbP } = await supabase.from('products').select('*').eq('id', pid).single();
-                if (dbP) {
-                    product = {
-                        _id: dbP.id,
-                        title: dbP.title,
-                        brand: "Verified Deal",
-                        category: dbP.category,
-                        imageUrl: dbP.image_url || "https://via.placeholder.com/300",
-                        platforms: dbP.platforms || [],
-                        aiPrediction: dbP.ai_prediction || { trend: 'drop', expectedPrice: 1000, recommendation: "Price alert active.", confidence: 85 }
-                    };
-                }
-            }
-            if (!product) {
-                product = staticMocks.find(m => m._id === pid);
-            }
+        for (const rawAlert of userAlerts) {
+            const pid = String(rawAlert.productId || rawAlert.product_id);
+            const product = await resolveProductById(pid);
+            const stdAlert = priceAlertService.standardizeAlertRecord(rawAlert, userId, product);
+
             if (product) {
                 resolvedAlerts.push({
-                    productId: alert.productId,
-                    targetPrice: alert.targetPrice,
+                    id: stdAlert.id,
+                    productId: stdAlert.product_id,
+                    targetPrice: stdAlert.target_price,
+                    currency: stdAlert.currency,
+                    isActive: stdAlert.is_active,
+                    notificationStatus: stdAlert.notification_status,
+                    lastCheckedAt: stdAlert.last_checked_at,
+                    lastObservedPrice: stdAlert.last_observed_price,
+                    triggeredAt: stdAlert.triggered_at,
+                    notificationSentAt: stdAlert.notification_sent_at,
+                    lastNotifiedPrice: stdAlert.last_notified_price,
+                    alert: stdAlert,
                     product
                 });
             }
@@ -1398,33 +1445,127 @@ app.post("/user/watchlist/remove", async (req, res) => {
 
 app.post("/user/alerts/set", async (req, res) => {
     try {
-        const { userId, productId, targetPrice } = req.body;
-        const { data: user } = await supabase.from('users').select('alerts').eq('id', userId).single();
+        const { userId, productId, targetPrice, isActive, currency } = req.body;
+        if (!userId || !productId) {
+            return res.status(400).json({ status: "error", message: "userId and productId are required" });
+        }
+
+        const numericTarget = priceAlertService.normalizeNumericPrice(targetPrice);
+        if (numericTarget === null || numericTarget <= 0) {
+            return res.status(400).json({ status: "error", message: "targetPrice must be a positive numeric value" });
+        }
+
+        const { data: user } = await supabase.from('users').select('*').eq('id', userId).single();
         const currentAlerts = user?.alerts || [];
-        const filteredAlerts = currentAlerts.filter(a => a.productId !== productId);
-        const newAlerts = [...filteredAlerts, { productId, targetPrice: parseFloat(targetPrice || 0) }];
+
+        // Fetch product to resolve metadata & current lowest price
+        const product = await resolveProductById(productId);
+
+        const newAlert = priceAlertService.standardizeAlertRecord({
+            productId: String(productId),
+            targetPrice: numericTarget,
+            currency: currency || 'INR',
+            isActive: isActive !== undefined ? isActive : true,
+            is_active: isActive !== undefined ? isActive : true,
+            notificationStatus: 'MONITORING',
+            notification_status: 'MONITORING'
+        }, userId, product);
+
+        // Immediate evaluation against current known price
+        let evalResult = null;
+        if (product && Array.isArray(product.platforms) && product.platforms.length > 0) {
+            const valid = product.platforms.filter(p => priceAlertService.normalizeNumericPrice(p.price) > 0);
+            if (valid.length > 0) {
+                const best = valid.reduce((min, p) => p.price < min.price ? p : min, valid[0]);
+                evalResult = await priceAlertService.evaluatePriceAlert(newAlert, best.price, user, {
+                    platformName: best.name || 'Store',
+                    productUrl: best.url || '',
+                    imageUrl: product.imageUrl || '',
+                    email: user?.email
+                });
+                Object.assign(newAlert, evalResult.alert);
+            }
+        }
+
+        const filteredAlerts = currentAlerts.filter(a => String(a.productId || a.product_id) !== String(productId));
+        const updatedAlerts = [...filteredAlerts, newAlert];
         
         let updatedUser = null;
         if (user) {
-            const { data } = await supabase.from('users').update({ alerts: newAlerts }).eq('id', userId).select().single();
+            const { data } = await supabase.from('users').update({ alerts: updatedAlerts }).eq('id', userId).select().single();
             updatedUser = data;
+        } else {
+            const { data } = await supabase.from('users').insert([{
+                id: userId,
+                name: 'Shopper',
+                email: `${userId}@example.com`,
+                password: '$2a$10$defaultpasswordhashplaceholderforalertuser',
+                alerts: updatedAlerts
+            }]).select().single();
+            updatedUser = data;
+        }
+
+        // If this is the mock demo product and mock testing flag is active, schedule 10-second simulation
+        if (String(productId) === priceAlertService.MOCK_ALERT_PRODUCT.id && priceAlertService.isMockAlertTestingEnabled()) {
+            priceAlertService.scheduleMockAlertSimulation(userId, newAlert, numericTarget, 10000);
         }
         
         res.json({
             status: "success",
-            user: normalizeUserResponse(updatedUser || { id: userId, alerts: newAlerts })
+            user: normalizeUserResponse(updatedUser || { id: userId, email: user?.email, alerts: updatedAlerts }),
+            alert: newAlert,
+            evaluation: evalResult
         });
     } catch (error) { 
         console.error("Alerts set error:", error);
+        res.status(500).json({ status: "error", message: "Failed to set price alert" });
+    }
+});
+
+app.post("/user/alerts/toggle", async (req, res) => {
+    try {
+        const { userId, productId, isActive } = req.body;
+        if (!userId || !productId) return res.status(400).json({ status: "error", message: "userId and productId required" });
+
+        const { data: user } = await supabase.from('users').select('*').eq('id', userId).single();
+        const currentAlerts = user?.alerts || [];
+        const updatedAlerts = currentAlerts.map(a => {
+            if (String(a.productId || a.product_id) === String(productId)) {
+                const targetState = isActive !== undefined ? Boolean(isActive) : !(a.isActive !== false && a.is_active !== false);
+                return {
+                    ...a,
+                    isActive: targetState,
+                    is_active: targetState
+                };
+            }
+            return a;
+        });
+
+        let updatedUser = null;
+        if (user) {
+            const { data } = await supabase.from('users').update({ alerts: updatedAlerts }).eq('id', userId).select().single();
+            updatedUser = data;
+        }
+
+        // Manage mock simulation timer on toggle
+        if (String(productId) === priceAlertService.MOCK_ALERT_PRODUCT.id) {
+            if (isActive === false) {
+                priceAlertService.cancelMockAlertSimulation(userId, productId);
+            } else if (priceAlertService.isMockAlertTestingEnabled()) {
+                const alertObj = currentAlerts.find(a => String(a.productId || a.product_id) === String(productId));
+                if (alertObj) {
+                    priceAlertService.scheduleMockAlertSimulation(userId, alertObj, alertObj.targetPrice || alertObj.target_price, 10000);
+                }
+            }
+        }
+
         res.json({
             status: "success",
-            user: normalizeUserResponse({
-                id: req.body.userId || "user_123",
-                email: "user@example.com",
-                name: "Shopper",
-                alerts: [{ productId: req.body.productId, targetPrice: parseFloat(req.body.targetPrice || 0) }]
-            })
-        }); 
+            user: normalizeUserResponse(updatedUser || { id: userId, alerts: updatedAlerts })
+        });
+    } catch (error) {
+        console.error("Alerts toggle error:", error);
+        res.status(500).json({ status: "error", message: "Failed to toggle alert" });
     }
 });
 
@@ -1433,12 +1574,17 @@ app.post("/user/alerts/remove", async (req, res) => {
         const { userId, productId } = req.body;
         const { data: user } = await supabase.from('users').select('alerts').eq('id', userId).single();
         const currentAlerts = user?.alerts || [];
-        const newAlerts = currentAlerts.filter(a => a.productId !== productId);
+        const newAlerts = currentAlerts.filter(a => String(a.productId || a.product_id) !== String(productId));
         
         let updatedUser = null;
         if (user) {
             const { data } = await supabase.from('users').update({ alerts: newAlerts }).eq('id', userId).select().single();
             updatedUser = data;
+        }
+
+        // Cancel mock simulation timer if running
+        if (String(productId) === priceAlertService.MOCK_ALERT_PRODUCT.id) {
+            priceAlertService.cancelMockAlertSimulation(userId, productId);
         }
         
         res.json({
@@ -1448,6 +1594,58 @@ app.post("/user/alerts/remove", async (req, res) => {
     } catch (error) { 
         console.error("Alerts remove error:", error);
         res.json({ status: "success", message: "Alert removed" }); 
+    }
+});
+
+// GET /api/demo/mock-product
+app.get("/api/demo/mock-product", (req, res) => {
+    res.json({
+        status: "success",
+        enabled: priceAlertService.isMockAlertTestingEnabled(),
+        data: priceAlertService.MOCK_ALERT_PRODUCT
+    });
+});
+
+// GET /user/notifications?userId=...
+app.get("/user/notifications", (req, res) => {
+    try {
+        const userId = req.query.userId || req.body?.userId;
+        if (!userId) return res.status(400).json({ status: "error", message: "userId required" });
+        const notifications = priceAlertService.getUserNotifications(userId);
+        res.json({ status: "success", data: notifications });
+    } catch (e) {
+        res.status(500).json({ status: "error", message: "Failed to fetch notifications" });
+    }
+});
+
+// POST /user/notifications/mark-read
+app.post("/user/notifications/mark-read", (req, res) => {
+    try {
+        const { userId, notificationId } = req.body;
+        if (!userId) return res.status(400).json({ status: "error", message: "userId required" });
+        priceAlertService.markNotificationAsRead(userId, notificationId);
+        res.json({ status: "success", message: "Marked as read" });
+    } catch (e) {
+        res.status(500).json({ status: "error", message: "Failed to update notification" });
+    }
+});
+
+// POST /api/alerts/evaluate (Manual or test evaluation trigger)
+app.post("/api/alerts/evaluate", async (req, res) => {
+    try {
+        const { productId, price, platformName, productUrl } = req.body;
+        if (productId && price !== undefined) {
+            const result = await priceAlertService.evaluateAllAlertsForProduct(productId, price, {
+                name: platformName || 'Manual Check',
+                url: productUrl || ''
+            });
+            return res.json({ status: "success", result });
+        } else {
+            const result = await priceAlertService.evaluateAllSystemAlerts();
+            return res.json({ status: "success", result });
+        }
+    } catch (err) {
+        res.status(500).json({ status: "error", message: err.message });
     }
 });
 
@@ -1758,6 +1956,9 @@ cron.schedule('0 2 * * *', async () => {
                 }
             } catch (err) { console.error(`Cron error for ${p.title}:`, err.message); }
         }
+
+        // Run price alert evaluation reconciliation across all active user alerts
+        await priceAlertService.evaluateAllSystemAlerts();
     } catch (err) { console.error("Cron global error:", err); }
 });
 
@@ -1784,6 +1985,10 @@ async function startServer() {
     });
 }
 
-startServer().catch((error) => {
-    console.error("Server startup failed:", error);
-});
+if (require.main === module) {
+    startServer().catch((error) => {
+        console.error("Server startup failed:", error);
+    });
+}
+
+module.exports = app;

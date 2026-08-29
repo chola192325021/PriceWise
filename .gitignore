@@ -59,6 +59,8 @@ web/dist/
 # Test results and temporary artifacts
 Test_Results/
 *.tmp
+app/backend/data/*.json
+!app/backend/data/.gitkeep
 
 # Environment Variables and Secret files (NEVER COMMIT)
 .env

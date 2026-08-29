@@ -43,6 +43,8 @@ jobs:
         run: node --check server.js
 
       - name: Run Backend & Chronos Integration Tests
+        env:
+          ENABLE_MOCK_PRICE_ALERTS: "true"
         run: npm test
 
   web-ci:

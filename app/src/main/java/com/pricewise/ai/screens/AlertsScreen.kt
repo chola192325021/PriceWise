@@ -38,14 +38,14 @@ fun AlertsScreen(
 
     val userAlerts = currentUser?.alerts ?: emptyList()
     
-    val alertProducts = remember(fetchedUserAlerts, userAlerts, products, searchResults) {
+    val alertItems = remember(fetchedUserAlerts, userAlerts, products, searchResults) {
         if (fetchedUserAlerts.isNotEmpty()) {
-            fetchedUserAlerts.map { Pair(it.product, it.targetPrice) }
+            fetchedUserAlerts
         } else {
             userAlerts.mapNotNull { alert ->
                 val product = viewModel.getProductById(alert.productId) ?: (products + searchResults).find { it.id == alert.productId }
-                if (product != null) Pair(product, alert.targetPrice) else null
-            }.distinctBy { it.first.id }
+                if (product != null) UserAlertItem(productId = alert.productId, targetPrice = alert.targetPrice, product = product) else null
+            }.distinctBy { it.product.id }
         }
     }
 
@@ -71,7 +71,7 @@ fun AlertsScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp)
         ) {
-            if (alertProducts.isEmpty()) {
+            if (alertItems.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.NotificationsNone, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -84,7 +84,17 @@ fun AlertsScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(bottom = 16.dp, top = 8.dp)
                 ) {
-                    items(alertProducts) { (product, targetPrice) ->
+                    items(alertItems) { item ->
+                        val product = item.product
+                        val targetPrice = item.targetPrice
+                        val cheapestPlatform = product.platforms.find { it.isSmartDeal } ?: product.platforms.firstOrNull()
+                        val currentPrice = cheapestPlatform?.price ?: 0.0
+                        val isTargetMet = currentPrice > 0.0 && currentPrice <= targetPrice
+                        val isSent = item.notificationStatus == "SENT"
+                        val isPaused = item.isActive == false
+
+                        val isMock = item.isMock == true || item.is_mock == true || product.isMock == true || product.is_mock == true || product.id == "mock-pricewise-alert-demo-v1"
+
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
@@ -93,6 +103,20 @@ fun AlertsScreen(
                             )
                         ) {
                             Column {
+                                if (isMock) {
+                                    Surface(
+                                        color = Color(0xFFF3E8FF),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            "MOCK PRODUCT — Demo product — simulated price changes",
+                                            color = Color(0xFF7E22CE),
+                                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
                                 Box(modifier = Modifier.clickable { onProductClick(product.id) }) {
                                     AiProductCard(product)
                                 }
@@ -101,11 +125,20 @@ fun AlertsScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        "Target Price: ₹${targetPrice.toInt()}",
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                    Column {
+                                        Text(
+                                            "Target: ₹${targetPrice.toInt()}",
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        if (isPaused) {
+                                            Text("Status: Paused", fontSize = MaterialTheme.typography.bodySmall.fontSize, color = Color.Gray)
+                                        } else if (isSent || isTargetMet) {
+                                            Text(if (isMock) "Status: Mock Target Reached (Notified)" else "Status: Target Reached", fontSize = MaterialTheme.typography.bodySmall.fontSize, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                                        } else {
+                                            Text(if (isMock) "Status: Armed (Drops in ~10s)" else "Status: Monitoring", fontSize = MaterialTheme.typography.bodySmall.fontSize, color = if (isMock) Color(0xFF9333EA) else Color(0xFF2563EB), fontWeight = if (isMock) FontWeight.Bold else FontWeight.Normal)
+                                        }
+                                    }
                                     TextButton(onClick = { viewModel.removePriceAlert(product.id) }) {
                                         Text("Remove Alert", color = MaterialTheme.colorScheme.error)
                                     }

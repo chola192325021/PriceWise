@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Search, Heart, User, ShoppingCart, Menu, X, Bot, Bell } from 'lucide-react';
+import { NotificationCenter } from './NotificationCenter';
 
 const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -10,6 +11,8 @@ const Navbar: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [searchValue, setSearchValue] = useState(searchParams.get('search') || '');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   useEffect(() => {
     setSearchValue(searchParams.get('search') || '');
@@ -98,15 +101,28 @@ const Navbar: React.FC = () => {
               <span className="text-xs mt-1 font-medium">AI Assistant</span>
             </Link>
 
-            <Link to="/alerts" className="relative flex flex-col items-center text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              <Bell className="w-6 h-6" />
-              {alertCount > 0 && (
-                <span className="absolute -top-1 right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                  {alertCount}
-                </span>
-              )}
-              <span className="text-xs mt-1 font-medium">Alerts</span>
-            </Link>
+            {/* Notification Bell with Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifOpen(prev => !prev)}
+                className="relative flex flex-col items-center text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors focus:outline-none"
+                title="Price Drop Notifications"
+              >
+                <Bell className="w-6 h-6" />
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {unreadNotifCount}
+                  </span>
+                )}
+                <span className="text-xs mt-1 font-medium">Alerts</span>
+              </button>
+
+              <NotificationCenter
+                isOpen={isNotifOpen}
+                onClose={() => setIsNotifOpen(false)}
+                onUnreadCountChange={setUnreadNotifCount}
+              />
+            </div>
 
             <Link to="/watchlist" className="relative flex flex-col items-center text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
               <Heart className="w-6 h-6" />

@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "start:chronos": "python forecasting_service/app.py",
-    "test": "node test_product_matching.js && node test_product_url_validator.js && node test_chronos_integration.js"
+    "test": "node test_product_matching.js && node test_product_url_validator.js && node test_chronos_integration.js && node test_price_alerts.js && node test_mock_alerts.js",
+    "test:alerts": "node test_price_alerts.js && node test_mock_alerts.js"
   },
   "keywords": [],
   "author": "",

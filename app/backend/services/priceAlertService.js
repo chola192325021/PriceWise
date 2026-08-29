@@ -181,7 +181,10 @@ async function sendPriceDropEmail({ toEmail, userName, productTitle, currentPric
 
     const userEmail = process.env.EMAIL_USER;
     const pass = process.env.EMAIL_PASS;
-    const isMock = Boolean(isMockOption || !userEmail || !pass || userEmail.includes("example.com") || pass.trim() === "mock_mode_active" || toEmail.includes("example.com"));
+    const appUrl = process.env.APP_URL || process.env.CLIENT_URL || 'http://localhost:5173/alerts';
+    
+    // Only intercept in mock mode if SMTP credentials are unset/placeholder or toEmail is a synthetic test domain
+    const isMock = !userEmail || !pass || userEmail.includes("example.com") || pass.trim() === "mock_mode_active" || toEmail.endsWith("@example.com");
 
     const symbol = currency === 'INR' ? '₹' : (currency || '₹');
     const subject = `${isMockOption ? '[DEMO ALERT] ' : ''}🔥 Price Drop Alert: ${productTitle} reached ${symbol}${currentPrice.toLocaleString()}`;
@@ -192,6 +195,7 @@ async function sendPriceDropEmail({ toEmail, userName, productTitle, currentPric
         console.log(`Product: ${productTitle}`);
         console.log(`Current Price: ${symbol}${currentPrice} (Target: ${symbol}${targetPrice})`);
         console.log(`Store: ${platformName} | URL: ${productUrl || 'N/A'}`);
+        console.log(`App Link: ${appUrl}`);
         console.log(`======================================================\n`);
         return { success: true, isMock: true, message: "Email logged in mock mode" };
     }
@@ -228,26 +232,32 @@ async function sendPriceDropEmail({ toEmail, userName, productTitle, currentPric
             body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
             .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
             .badge { display: inline-block; background: #dcfce7; color: #166534; padding: 6px 14px; border-radius: 9999px; font-weight: 700; font-size: 13px; text-transform: uppercase; }
+            .demo-badge { display: inline-block; background: #f3e8ff; color: #7e22ce; padding: 6px 14px; border-radius: 9999px; font-weight: 700; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; }
             .title { font-size: 22px; font-weight: 800; color: #0f172a; margin: 16px 0 8px 0; line-height: 1.3; }
             .price-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px; margin: 24px 0; }
             .current-price { font-size: 32px; font-weight: 900; color: #15803d; }
             .target-price { font-size: 14px; color: #64748b; margin-top: 4px; }
-            .btn { display: inline-block; background: #2563eb; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 15px; margin-top: 12px; }
+            .btn-primary { display: inline-block; background: #2563eb; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 15px; margin-right: 12px; margin-top: 12px; }
+            .btn-secondary { display: inline-block; background: #f1f5f9; color: #334155 !important; text-decoration: none; padding: 14px 24px; border-radius: 10px; font-weight: 700; font-size: 15px; border: 1px solid #cbd5e1; margin-top: 12px; }
             .footer { font-size: 12px; color: #94a3b8; margin-top: 32px; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 16px; }
           </style>
         </head>
         <body>
           <div class="card">
+            ${isMockOption ? '<span class="demo-badge">MOCK / DEMO ALERT</span><br/>' : ''}
             <span class="badge">Target Price Reached!</span>
             <h1 class="title">${productTitle}</h1>
-            <p style="color: #475569; font-size: 15px;">Great news, ${userName || 'Shopper'}! The price for this product on <strong>${platformName}</strong> has dropped to or below your target price.</p>
+            <p style="color: #475569; font-size: 15px;">Great news, ${userName || 'Shopper'}! The price for this product on <strong>${platformName}</strong> has reached or dropped below your target price.</p>
             
             <div class="price-box">
               <div class="current-price">${symbol}${currentPrice.toLocaleString()}</div>
               <div class="target-price">Your Target: <strong>${symbol}${targetPrice.toLocaleString()}</strong> (You saved ${symbol}${(targetPrice - currentPrice).toLocaleString()}!)</div>
             </div>
 
-            ${productUrl ? `<a href="${productUrl}" class="btn" target="_blank">View Deal on ${platformName} &rarr;</a>` : ''}
+            <div>
+              <a href="${appUrl}" class="btn-primary" target="_blank">Open PriceWise App &rarr;</a>
+              ${productUrl ? `<a href="${productUrl}" class="btn-secondary" target="_blank">View on ${platformName}</a>` : ''}
+            </div>
 
             <div class="footer">
               <p>You received this email because you set a price alert on PriceWise.</p>
@@ -262,10 +272,11 @@ async function sendPriceDropEmail({ toEmail, userName, productTitle, currentPric
             from: senderAddress,
             to: toEmail,
             subject: subject,
-            text: `Target Price Reached!\n\n${productTitle} is now ${symbol}${currentPrice} on ${platformName}, which is below your target of ${symbol}${targetPrice}.\n\nView Deal: ${productUrl || 'Check PriceWise App'}`,
+            text: `${isMockOption ? '[DEMO ALERT] ' : ''}Target Price Reached!\n\n${productTitle} is now ${symbol}${currentPrice} on ${platformName}, which is below your target of ${symbol}${targetPrice}.\n\nOpen PriceWise App: ${appUrl}\n${productUrl ? `View Deal on ${platformName}: ${productUrl}` : ''}`,
             html: htmlContent
         });
 
+        console.log(`[PriceAlertService] Real price drop email sent successfully to ${toEmail}`);
         return { success: true, isMock: false };
     } catch (err) {
         console.error("[PriceAlertService] Email sending failed:", err.message);

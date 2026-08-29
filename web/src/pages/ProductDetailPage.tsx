@@ -13,11 +13,25 @@ const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; load
     );
   }
 
-  if (!forecastData || !forecastData.forecast || forecastData.forecast.length === 0) {
+  if (!forecastData) {
     return null;
   }
 
+  if (forecastData.forecastSource === 'insufficient_data' || !forecastData.forecast || forecastData.forecast.length === 0) {
+    return (
+      <div className="bg-slate-50 dark:bg-slate-800/80 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 mb-6 flex items-center">
+        <Info className="w-5 h-5 text-amber-500 mr-3 flex-shrink-0" />
+        <div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">Not enough price history for a reliable prediction yet</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">We continuously record daily observations to generate AI time-series forecasts.</div>
+        </div>
+      </div>
+    );
+  }
+
   const lastPoint = forecastData.forecast[forecastData.forecast.length - 1];
+  const isAi = forecastData.isAiPrediction || forecastData.forecastSource === 'chronos';
+  const isFallback = forecastData.fallbackUsed || forecastData.forecastSource === 'baseline';
 
   const getTrendBadge = () => {
     if (forecastData.trend === 'likely_decrease') {
@@ -45,11 +59,11 @@ const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; load
     <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-2xl border border-slate-700 shadow-xl mb-6">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <div className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-1">
-            Amazon Chronos Time-Series AI
+          <div className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-1 flex items-center gap-1.5">
+            {isAi ? 'AI forecast • Powered by Chronos' : 'Estimated trend • AI forecast temporarily unavailable'}
           </div>
           <h3 className="text-lg font-black flex items-center">
-            14-Day Price Forecast Estimate
+            {forecastData.horizon || 14}-Day Price Trajectory
           </h3>
         </div>
         {getTrendBadge()}
@@ -61,7 +75,7 @@ const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; load
           <span className="text-lg font-bold text-white">₹{forecastData.currentPrice.toLocaleString()}</span>
         </div>
         <div>
-          <span className="block text-[10px] uppercase font-bold text-slate-400">14-Day Predicted</span>
+          <span className="block text-[10px] uppercase font-bold text-slate-400">{forecastData.horizon || 14}-Day Predicted</span>
           <span className="text-lg font-black text-blue-400">₹{lastPoint.predictedPrice.toLocaleString()}</span>
         </div>
         <div>
@@ -72,7 +86,14 @@ const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; load
         </div>
       </div>
 
-      {forecastData.warning && (
+      {isFallback && forecastData.fallbackReason && (
+        <div className="text-xs text-amber-200/90 bg-amber-950/40 p-2.5 rounded-lg border border-amber-800/40 mb-3 flex items-center">
+          <Info className="w-4 h-4 mr-1.5 flex-shrink-0 text-amber-400" />
+          <span>{forecastData.fallbackReason}. Displaying baseline trend estimation.</span>
+        </div>
+      )}
+
+      {forecastData.warning && !isFallback && (
         <div className="text-xs text-amber-300 bg-amber-950/50 p-2.5 rounded-lg border border-amber-800/50 mb-3 flex items-center">
           <Info className="w-4 h-4 mr-1.5 flex-shrink-0" />
           {forecastData.warning}
@@ -81,7 +102,7 @@ const ChronosForecastCard: React.FC<{ forecastData: ChronosForecast | null; load
 
       <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium pt-2 border-t border-slate-700/80">
         <span>Model: {forecastData.model}</span>
-        <span>Confidence: {forecastData.confidence.toUpperCase()}</span>
+        <span>Confidence: {(forecastData.confidence || 'medium').toUpperCase()}</span>
         <span className="italic">Estimate Only • Not Guaranteed</span>
       </div>
     </div>

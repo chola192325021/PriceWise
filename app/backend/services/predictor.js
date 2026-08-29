@@ -265,7 +265,7 @@ async function predictPriceDrop({ productId, title, category, priceHistory, plat
     };
 }
 
-function generateChronosBaseline(productId, sourceId, priceHistory, currentPrice = 0, horizon = 14) {
+function generateChronosBaseline(productId, sourceId, priceHistory, currentPrice = 0, horizon = 14, fallbackReason = "Chronos AI service unavailable") {
     const dailySeries = normalizeDailySeries(priceHistory, currentPrice);
     const historyPoints = dailySeries.length;
     const currentP = historyPoints > 0 ? dailySeries[dailySeries.length - 1].dailyBestPrice : (currentPrice || 1000);
@@ -309,6 +309,10 @@ function generateChronosBaseline(productId, sourceId, priceHistory, currentPrice
         sourceId: sourceId || "General",
         currency: "INR",
         model: "chronos-zero-shot-baseline",
+        forecastSource: "baseline",
+        isAiPrediction: false,
+        fallbackUsed: true,
+        fallbackReason: fallbackReason,
         forecastGeneratedAt: new Date().toISOString(),
         interval: "daily",
         horizon,

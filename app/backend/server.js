@@ -3,11 +3,13 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const cron = require('node-cron');
 const express = require("express");
 const cors = require("cors");
+const axios = require("axios");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const supabase = require("./supabase");
 const scraper = require("./services/scraper");
 const predictor = require("./services/predictor");
+const chronosClient = require("./services/chronosClient");
 const sourceSelector = require("./services/sourceSelector");
 const matcher = require("./services/matcher");
 const productNormalizer = require("./services/productNormalizer");
@@ -1525,37 +1527,66 @@ const handlePriceForecast = async (req, res) => {
             currentPrice = platforms.length > 0 ? Math.min(...platforms.map(p => p.price)) : 1000;
         }
 
-        try {
-            const pyRes = await axios.post('http://127.0.0.1:5001/forecast', {
-                productId,
-                sourceId,
-                currency: 'INR',
-                horizon,
-                points: priceHistory.length > 0 ? priceHistory : [{ price: currentPrice || 1000, date: new Date().toISOString() }]
-            }, { timeout: 4500 });
+        // Attempt Chronos AI microservice forecast
+        const chronosResult = await chronosClient.getChronosForecast({
+            productId,
+            sourceId,
+            currency: 'INR',
+            horizon,
+            priceHistory,
+            currentPrice
+        });
 
-            if (pyRes.data && pyRes.data.status === 'success') {
-                const responseObj = { status: 'success', data: pyRes.data };
-                forecastCache.set(cacheKey, { timestamp: Date.now(), data: responseObj });
-                return res.json(responseObj);
-            }
-        } catch (pyErr) {
-            console.warn(`[Chronos Microservice] Calling Python 5001 skipped/failed (${pyErr.message}). Using baseline forecaster.`);
+        if (chronosResult.ok && chronosResult.data) {
+            const responseObj = { status: 'success', data: chronosResult.data };
+            forecastCache.set(cacheKey, { timestamp: Date.now(), data: responseObj });
+            return res.json(responseObj);
         }
 
-        const baseline = predictor.generateChronosBaseline(productId, sourceId, priceHistory, currentPrice, horizon);
+        // Transparent baseline fallback
+        const baseline = predictor.generateChronosBaseline(
+            productId,
+            sourceId,
+            priceHistory,
+            currentPrice,
+            horizon,
+            chronosResult.fallbackReason || "Chronos microservice unavailable"
+        );
         const responseObj = { status: 'success', data: baseline };
         forecastCache.set(cacheKey, { timestamp: Date.now(), data: responseObj });
         return res.json(responseObj);
     } catch (err) {
         console.error("Forecast route error:", err);
-        const baseline = predictor.generateChronosBaseline(productId, sourceId, [], 1000, horizon);
+        const baseline = predictor.generateChronosBaseline(
+            productId,
+            sourceId,
+            [],
+            1000,
+            horizon,
+            `Internal error: ${err.message}`
+        );
         return res.json({ status: 'success', data: baseline });
     }
 };
 
 app.get("/products/:id/price-forecast", handlePriceForecast);
 app.get("/api/products/:id/price-forecast", handlePriceForecast);
+
+app.get("/api/forecasting/health", async (req, res) => {
+    const health = await chronosClient.checkChronosHealth();
+    res.json({
+        nodeBackend: "ok",
+        chronos: health
+    });
+});
+
+app.get("/forecasting/health", async (req, res) => {
+    const health = await chronosClient.checkChronosHealth();
+    res.json({
+        nodeBackend: "ok",
+        chronos: health
+    });
+});
 
 // Centralized FAQ Dataset & Local Deterministic FAQ Matching Engine
 const faqDataset = require('./data/faq.json');

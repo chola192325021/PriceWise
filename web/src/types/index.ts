@@ -200,6 +200,10 @@ export interface ChronosForecast {
   sourceId: string;
   currency: string;
   model: string;
+  forecastSource?: 'chronos' | 'baseline' | 'insufficient_data';
+  isAiPrediction?: boolean;
+  fallbackUsed?: boolean;
+  fallbackReason?: string | null;
   forecastGeneratedAt: string;
   interval: string;
   horizon: number;

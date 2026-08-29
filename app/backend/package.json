@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test_product_matching.js && node test_product_url_validator.js"
+    "test": "node test_product_matching.js && node test_product_url_validator.js && node test_chronos_integration.js"
   },
   "keywords": [],
   "author": "",

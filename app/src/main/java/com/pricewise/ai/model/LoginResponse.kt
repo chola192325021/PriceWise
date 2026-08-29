@@ -13,6 +13,15 @@ data class LoginResponse(
     val user: User?
 )
 
+fun versionedProfileUrl(url: String?, version: String?): String? {
+    if (url.isNullOrBlank()) return null
+    if (url.startsWith("data:", ignoreCase = true) || (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true))) {
+        return url
+    }
+    val separator = if (url.contains("?")) "&" else "?"
+    return "$url${separator}v=${version ?: "default"}"
+}
+
 data class User(
     @SerializedName("id")
     val id: String?,
@@ -41,9 +50,7 @@ data class User(
                 ?: profilePhoto?.takeIf { it.isNotBlank() }
                 ?: profile_photo?.takeIf { it.isNotBlank() }
                 ?: return ""
-            if (photoVersion.isNullOrBlank()) return base
-            val separator = if (base.contains("?")) "&" else "?"
-            return "$base${separator}v=$photoVersion"
+            return versionedProfileUrl(base, photoVersion) ?: ""
         }
 }
 

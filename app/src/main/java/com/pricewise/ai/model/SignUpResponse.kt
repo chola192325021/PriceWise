@@ -26,12 +26,17 @@ data class UserData(
     val profilePhotoUrl: String? = null,
     @SerializedName("profile_photo")
     val profile_photo: String? = null,
+    @SerializedName("photoVersion")
+    val photoVersion: String? = null,
     @SerializedName("memberSince")
     val memberSince: String? = null
 ) {
     val photoUrl: String
-        get() = profilePhotoUrl?.takeIf { it.isNotBlank() }
-            ?: profilePhoto?.takeIf { it.isNotBlank() }
-            ?: profile_photo?.takeIf { it.isNotBlank() }
-            ?: ""
+        get() {
+            val base = profilePhotoUrl?.takeIf { it.isNotBlank() }
+                ?: profilePhoto?.takeIf { it.isNotBlank() }
+                ?: profile_photo?.takeIf { it.isNotBlank() }
+                ?: return ""
+            return versionedProfileUrl(base, photoVersion) ?: ""
+        }
 }

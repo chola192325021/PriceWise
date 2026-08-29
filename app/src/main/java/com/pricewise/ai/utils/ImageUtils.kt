@@ -23,4 +23,26 @@ object ImageUtils {
             null
         }
     }
+
+    fun isBase64Image(dataString: String?): Boolean {
+        if (dataString.isNullOrBlank()) return false
+        return dataString.startsWith("data:image", ignoreCase = true) ||
+               (dataString.length > 200 && !dataString.startsWith("http://", ignoreCase = true) && !dataString.startsWith("https://", ignoreCase = true))
+    }
+
+    fun base64ToBitmap(base64String: String?): Bitmap? {
+        if (base64String.isNullOrBlank()) return null
+        return try {
+            val cleanBase64 = if (base64String.contains(",")) {
+                base64String.substringAfter(",")
+            } else {
+                base64String
+            }
+            val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
 }

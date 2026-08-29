@@ -489,17 +489,19 @@ class AuthViewModel : ViewModel() {
                     "id" to userId,
                     "name" to name,
                     "email" to email,
-                    "profilePhoto" to profilePhoto
+                    "profilePhoto" to profilePhoto,
+                    "profilePhotoUrl" to profilePhoto,
+                    "profile_photo" to profilePhoto
                 )
                 val response = RetrofitInstance.api.updateProfile(request)
                 if (response.isSuccessful && response.body() != null && response.body()?.user != null) {
                     _currentUser.value = response.body()!!.user
-                    Log.d("AuthViewModel", "Profile updated successfully: ${_currentUser.value?.name}")
+                    Log.d("PriceWiseProfile", "Profile updated successfully: ${_currentUser.value?.name}")
                 } else {
-                    Log.e("AuthViewModel", "Profile update failed: ${response.message()}")
+                    Log.e("PriceWiseProfile", "Profile update failed: ${response.message()}")
                 }
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Profile update exception", e)
+                Log.e("PriceWiseProfile", "Profile update exception", e)
             }
         }
     }
@@ -510,11 +512,20 @@ class AuthViewModel : ViewModel() {
             try {
                 val response = RetrofitInstance.api.getUserProfile(targetId)
                 if (response.isSuccessful && response.body()?.user != null) {
-                    _currentUser.value = response.body()!!.user
-                    Log.d("AuthViewModel", "User profile refreshed successfully: ${_currentUser.value?.name}")
+                    val user = response.body()!!.user
+                    _currentUser.value = user
+                    val safeUri = user?.profilePhotoUrl?.takeIf { !com.pricewise.ai.utils.ImageUtils.isBase64Image(it) }?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+                    Log.d(
+                        "PriceWiseProfile",
+                        "User profile refreshed successfully: name=${user?.name}, " +
+                            "hasPhotoUrl=${!user?.photoUrl.isNullOrBlank()}, " +
+                            "isBase64=${com.pricewise.ai.utils.ImageUtils.isBase64Image(user?.photoUrl)}, " +
+                            "scheme=${safeUri?.scheme}, host=${safeUri?.host}, " +
+                            "photoVersionPresent=${!user?.photoVersion.isNullOrBlank()}"
+                    )
                 }
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Fetch user profile error", e)
+                Log.e("PriceWiseProfile", "Fetch user profile error", e)
             }
         }
     }

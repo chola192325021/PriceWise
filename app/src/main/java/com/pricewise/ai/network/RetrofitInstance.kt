@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 import android.util.Log
 
 object RetrofitInstance {
-    private const val BASE_URL = "http://172.18.101.206:5000/"
+    private const val BASE_URL = "http://10.108.38.180:5000/"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)

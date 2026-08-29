@@ -120,11 +120,44 @@ fun ProfileScreen(
                     .fillMaxWidth()
                     .padding(vertical = 16.dp)
             ) {
+                val photoToDisplay = editedPhoto.ifEmpty { currentUser?.photoUrl ?: "" }
+                val isBase64 = remember(photoToDisplay) { ImageUtils.isBase64Image(photoToDisplay) }
+                val bitmapModel: android.graphics.Bitmap? = remember(photoToDisplay) {
+                    if (isBase64) ImageUtils.base64ToBitmap(photoToDisplay) else null
+                }
+                val imageModel: Any? = if (isBase64) bitmapModel else if (photoToDisplay.isNotBlank()) photoToDisplay else null
+                val safeUri = if (!isBase64 && photoToDisplay.isNotBlank()) {
+                    runCatching { Uri.parse(photoToDisplay) }.getOrNull()
+                } else null
+
+                LaunchedEffect(photoToDisplay) {
+                    android.util.Log.d(
+                        "PriceWiseProfile",
+                        "Profile photo state: hasPhoto=${photoToDisplay.isNotBlank()}, " +
+                            "isBase64=$isBase64, " +
+                            "scheme=${safeUri?.scheme}, host=${safeUri?.host}, " +
+                            "photoVersionPresent=${!currentUser?.photoVersion.isNullOrBlank()}"
+                    )
+                }
+
                 Box {
-                    val photoToDisplay = editedPhoto.ifEmpty { currentUser?.photoUrl ?: "" }
-                    if (photoToDisplay.isNotEmpty()) {
+                    if (imageModel != null) {
                         AsyncImage(
-                            model = photoToDisplay,
+                            model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                .data(imageModel)
+                                .crossfade(true)
+                                .listener(
+                                    onSuccess = { _, _ ->
+                                        android.util.Log.d("PriceWiseProfile", "Profile image loaded successfully")
+                                    },
+                                    onError = { _, result ->
+                                        android.util.Log.w(
+                                            "PriceWiseProfile",
+                                            "Profile image load failed: ${result.throwable.javaClass.simpleName}: ${result.throwable.message}"
+                                        )
+                                    }
+                                )
+                                .build(),
                             contentDescription = "Profile Picture",
                             modifier = Modifier
                                 .size(100.dp)

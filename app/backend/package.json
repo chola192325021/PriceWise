@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "start:chronos": "python forecasting_service/app.py",
     "test": "node test_product_matching.js && node test_product_url_validator.js && node test_chronos_integration.js"
   },
   "keywords": [],

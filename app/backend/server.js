@@ -1770,6 +1770,14 @@ async function startServer() {
 
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`Server is running on port ${PORT} (bound to 0.0.0.0)`);
+        // Non-blocking Chronos microservice health probe
+        chronosClient.checkChronosHealth().then(health => {
+            if (health.reachable) {
+                console.log(`[Chronos Microservice] Health check: reachable and ready at ${health.url} (model: ${health.model}).`);
+            } else {
+                console.warn(`[Chronos Microservice] Health check: unavailable (${health.error}) at ${health.url}. Baseline fallback will be used until Python service starts.`);
+            }
+        }).catch(() => {});
     });
 }
 

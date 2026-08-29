@@ -190,6 +190,8 @@ def Math_round(val):
 def health():
     return jsonify({
         "status": "ok",
+        "service": "chronos-forecasting",
+        "ready": True,
         "model": MODEL_NAME,
         "chronosLoaded": MODEL_LOADED,
         "timestamp": datetime.utcnow().isoformat() + "Z"

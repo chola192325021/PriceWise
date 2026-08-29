@@ -870,7 +870,13 @@ app.get("/products/search-live", async (req, res) => {
         // If live scrapers return no products (or time out), query catalog fallbacks
         if (results.length === 0) {
             const qLower = cleanQuery.toLowerCase();
-            const catalogMocks = getSharedMocks();
+            const catalogMocks = [...getSharedMocks()];
+            
+            // If search is for demo or mock alert and mock testing is enabled, include the mock demo product
+            if (priceAlertService.isMockAlertTestingEnabled() && (qLower.includes('demo') || qLower.includes('mock') || qLower.includes('alert') || qLower.includes('test'))) {
+                catalogMocks.unshift(priceAlertService.MOCK_ALERT_PRODUCT);
+            }
+
             const brandCategory = category || 'Auto';
             const reqEligibleStores = sourceSelector.getEligibleSources({ query: cleanQuery, category: brandCategory });
 
@@ -878,11 +884,12 @@ app.get("/products/search-live", async (req, res) => {
                 .filter(m => 
                     m.title.toLowerCase().includes(qLower) || 
                     (m.category && m.category.toLowerCase().includes(qLower)) ||
-                    (m.brand && m.brand.toLowerCase().includes(qLower))
+                    (m.brand && m.brand.toLowerCase().includes(qLower)) ||
+                    (m.isMock && (qLower.includes('demo') || qLower.includes('mock') || qLower.includes('alert')))
                 )
                 .map(m => ({
                     ...m,
-                    platforms: m.platforms.filter(p => reqEligibleStores.includes(p.name))
+                    platforms: m.isMock ? m.platforms : m.platforms.filter(p => reqEligibleStores.includes(p.name))
                 }))
                 .filter(m => m.platforms.length > 0);
 

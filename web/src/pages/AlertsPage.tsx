@@ -5,14 +5,49 @@ import { UserAlertItem, UserAlertsResponse, Product } from '../types';
 import { Bell, Trash2, ArrowRight, Loader2, TrendingDown, TrendingUp, CheckCircle, AlertTriangle, PauseCircle, PlayCircle, Clock, Edit2, Check, X, Sparkles, TestTube2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
+const DEFAULT_DEMO_PRODUCT: Product = {
+  _id: 'mock-pricewise-alert-demo-v1',
+  title: 'PriceWise Demo Wireless Headphones',
+  brand: 'PriceWise Demo',
+  category: 'Demo & Testing',
+  imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=60',
+  platforms: [
+    {
+      name: 'PriceWise Demo Store',
+      price: 1999,
+      url: '',
+      isSmartDeal: true,
+      comparisonEligible: false,
+      isMock: true
+    }
+  ],
+  isMock: true,
+  is_mock: true,
+  mockType: 'target_price_alert_demo',
+  aiPrediction: {
+    status: 'success',
+    trend: 'drop',
+    expectedPrice: 1499,
+    currentBestPrice: 1999,
+    bestPlatform: 'PriceWise Demo Store',
+    observedLowPrice: 1999,
+    historyDays: 7,
+    recommendation: 'WAIT',
+    confidence: 100,
+    confidenceLabel: 'High',
+    message: 'Demo simulation ready.',
+    reason: 'Price drop simulation armed.'
+  }
+};
+
 const AlertsPage: React.FC = () => {
   const { user, removePriceAlert, setPriceAlert } = useAuth();
   const [alertItems, setAlertItems] = useState<UserAlertItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [editingAlertId, setEditingAlertId] = useState<string | null>(null);
   const [editPriceVal, setEditPriceVal] = useState<string>('');
-  const [demoProduct, setDemoProduct] = useState<Product | null>(null);
-  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [demoProduct, setDemoProduct] = useState<Product>(DEFAULT_DEMO_PRODUCT);
+  const [demoEnabled, setDemoEnabled] = useState(true);
   const [demoTargetInput, setDemoTargetInput] = useState('1500');
   const [isArmingDemo, setIsArmingDemo] = useState(false);
 
@@ -42,17 +77,20 @@ const AlertsPage: React.FC = () => {
     try {
       const res = await apiClient.get('/api/demo/mock-product');
       if (res.data?.status === 'success') {
-        setDemoEnabled(Boolean(res.data.enabled));
-        setDemoProduct(res.data.data);
+        setDemoEnabled(res.data.enabled !== false);
+        if (res.data.data) setDemoProduct(res.data.data);
       }
     } catch (e) {
-      // Demo not enabled
+      // Keep default demoProduct
     }
   };
 
   useEffect(() => {
-    fetchAlertProducts();
     checkDemoStatus();
+  }, []);
+
+  useEffect(() => {
+    fetchAlertProducts();
   }, [user]);
 
   // If there's an active mock alert in MONITORING state, schedule a polling check after 10-12 seconds

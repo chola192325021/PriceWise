@@ -66,6 +66,8 @@ export interface Platform {
   url: string;
   urlValidation?: UrlValidation;
   isSmartDeal: boolean;
+  isMock?: boolean;
+  is_mock?: boolean;
   /** The actual listing title on this platform (may differ from the query title) */
   productTitle?: string | null;
   /** Clean title extracted without UI artifacts */

@@ -42,10 +42,11 @@ const MOCK_ALERT_PRODUCT = {
 };
 
 /**
- * Returns true if mock alert testing is enabled via environment variable.
+ * Returns true if mock alert testing is enabled (enabled by default in dev/test unless explicitly set to 'false').
  */
 function isMockAlertTestingEnabled() {
-    return process.env.ENABLE_MOCK_PRICE_ALERTS === 'true';
+    if (process.env.ENABLE_MOCK_PRICE_ALERTS === 'false') return false;
+    return process.env.ENABLE_MOCK_PRICE_ALERTS === 'true' || process.env.NODE_ENV !== 'production';
 }
 
 // In-memory registry of scheduled mock alert timers
